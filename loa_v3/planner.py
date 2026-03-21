@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import sys
 from typing import Any
 
 from loa_v3.model_client import ModelClient, ModelClientError
@@ -12,6 +13,10 @@ PLAN_SCHEMA: dict[str, Any] = {
     'type': 'object',
     'required': ['id', 'goal', 'rationale', 'steps'],
 }
+
+
+def _default_inspect_command() -> list[str]:
+    return [sys.executable, '-c', 'import os; print(os.getcwd())']
 
 
 class Planner:
@@ -26,7 +31,7 @@ class FallbackPlanner(Planner):
             title='Inspect working directory',
             objective='Gather basic local context before deeper actions.',
             tool_name='shell',
-            tool_input={'command': ['powershell', '-Command', 'Get-Location']},
+            tool_input={'command': _default_inspect_command()},
             expected_outcome='Current working directory is printed successfully.',
         )
         return Plan(
@@ -72,7 +77,7 @@ class ModelBackedPlanner(Planner):
                     title=str(raw.get('title') or f'Step {index}'),
                     objective=str(raw.get('objective') or 'Execute requested action.'),
                     tool_name=str(raw.get('tool_name') or 'shell'),
-                    tool_input=dict(raw.get('tool_input') or {'command': ['powershell', '-Command', 'Get-Location']}),
+                    tool_input=dict(raw.get('tool_input') or {'command': _default_inspect_command()}),
                     expected_outcome=str(raw.get('expected_outcome') or 'Command exits successfully.'),
                 )
             )

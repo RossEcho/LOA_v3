@@ -42,6 +42,8 @@ class ToolRunner:
             stdout = exc.stdout or ''
             stderr = (exc.stderr or '') + '\nTimed out after 30s'
             exit_code = -9
+        except OSError as exc:
+            raise ToolRunnerError(f'command execution failed: {exc}') from exc
 
         return StepOutcome(
             exit_code=exit_code,

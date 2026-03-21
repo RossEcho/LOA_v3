@@ -11,7 +11,7 @@ from loa_v3.reporter import Reporter
 from loa_v3.tool_registry import ToolRegistry
 from loa_v3.tool_runner import ToolRunner
 from loa_v3.tool_selector import ToolSelector
-from loa_v3.types import RuntimeLimits
+from loa_v3.types import PlanStep, RuntimeLimits
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -45,3 +45,25 @@ def test_tool_registry_exposes_three_tool_types() -> None:
     registry = ToolRegistry(PROJECT_ROOT)
     tool_types = {tool.tool_type for tool in registry.list_tools()}
     assert {0, 1, 2}.issubset(tool_types)
+
+
+def test_fallback_planner_uses_portable_python_command() -> None:
+    plan = FallbackPlanner().build_plan('inspect', runtime_limits=RuntimeLimits(), tools=[])
+    assert plan.steps[0].tool_input['command'][0]
+    assert '-c' in plan.steps[0].tool_input['command']
+
+
+def test_missing_command_becomes_tool_failure_instead_of_crash() -> None:
+    orchestrator = build_test_orchestrator()
+    bad_step = PlanStep(
+        id='bad_step',
+        title='Run missing command',
+        objective='Verify missing executables fail gracefully.',
+        tool_name='shell',
+        tool_input={'command': ['command-that-does-not-exist-12345']},
+        expected_outcome='The command should fail without crashing the orchestrator.',
+    )
+
+    record = orchestrator._execute_step(bad_step)
+    assert record.status == 'failed'
+    assert 'command execution failed' in record.anomalies[0]
