@@ -1,4 +1,4 @@
-﻿{
+{
   "model": {
     "backend": "llama-server",
     "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
@@ -16,6 +16,7 @@
     "allow_privilege_escalation": false,
     "stop_on_no_progress": true,
     "stop_on_step_failure": true,
-    "debug": false
+    "debug": false,
+    "command_timeout_sec": 90
   }
 }

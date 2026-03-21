@@ -68,4 +68,5 @@ class SettingsLoader:
             allow_privilege_escalation=bool(runtime['allow_privilege_escalation']),
             stop_on_no_progress=bool(runtime['stop_on_no_progress']),
             stop_on_step_failure=bool(runtime['stop_on_step_failure']),
+            command_timeout_sec=int(runtime.get('command_timeout_sec', 90)),
         )

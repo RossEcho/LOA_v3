@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -8,12 +8,32 @@ import sys
 from loa_v3.types import ToolDefinition
 
 
+GENERIC_CLI_USAGE_HINT = (
+    'Generic CLI tool. Use metadata.input_contract to supply required positional values '
+    'and honor metadata.execution.safe_default_flags when the tool is long-running by default.'
+)
+
+
 def _enrich_tool_metadata(tool: ToolDefinition) -> ToolDefinition:
     metadata = dict(tool.metadata)
     if tool.tool_type == 1 and 'input_contract' not in metadata:
         metadata['input_contract'] = {'arg_1': 'string'}
+    if tool.tool_type == 1 and 'argument_order' not in metadata:
+        metadata['argument_order'] = list((metadata.get('input_contract') or {}).keys())
+    if tool.tool_type == 1 and 'required_args' not in metadata:
+        metadata['required_args'] = list((metadata.get('input_contract') or {}).keys())
+    if tool.tool_type == 1 and 'optional_args' not in metadata:
+        metadata['optional_args'] = []
+    if tool.tool_type == 1 and 'platform_variants' not in metadata:
+        metadata['platform_variants'] = []
+    if tool.tool_type == 1 and 'execution' not in metadata:
+        metadata['execution'] = {
+            'long_running_by_default': False,
+            'safe_default_flags': [],
+            'default_timeout_sec': 30,
+        }
     if tool.tool_type == 1 and 'usage_hint' not in metadata:
-        metadata['usage_hint'] = 'Generic CLI tool. Use arg_1 for the main positional argument unless the manifest specifies more structured inputs.'
+        metadata['usage_hint'] = GENERIC_CLI_USAGE_HINT
     if tool.tool_type == 2 and 'usage_hint' not in metadata:
         metadata['usage_hint'] = 'Script tool with structured inputs defined in metadata.input_contract.'
     return ToolDefinition(
@@ -51,7 +71,16 @@ class ToolRegistry:
                 'version': sys.version.split()[0],
                 'help_hint': '--help',
                 'input_contract': {'arg_1': 'string'},
-                'usage_hint': 'Generic CLI tool. Use arg_1 for the main positional argument.',
+                'argument_order': ['arg_1'],
+                'required_args': ['arg_1'],
+                'optional_args': [],
+                'platform_variants': [sys.platform],
+                'execution': {
+                    'long_running_by_default': False,
+                    'safe_default_flags': [],
+                    'default_timeout_sec': 30,
+                },
+                'usage_hint': GENERIC_CLI_USAGE_HINT,
             },
         )
 

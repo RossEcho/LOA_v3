@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
+from loa_v3.app import _settings_summary
 from loa_v3.config_loader import SettingsLoader
 from loa_v3.prompt_registry import PromptRegistry
 
@@ -22,3 +23,13 @@ def test_settings_loader_reads_defaults() -> None:
     assert settings['model']['endpoint'].startswith('http://')
     assert settings['runtime']['max_steps'] >= 1
     assert settings['runtime']['allow_network'] is True
+    assert settings['runtime']['command_timeout_sec'] == 90
+
+
+def test_settings_summary_exposes_submenu_items() -> None:
+    loader = SettingsLoader(PROJECT_ROOT)
+    settings = loader.load()
+    summary = _settings_summary(settings)
+    assert any('Llama endpoint' in item for item in summary)
+    assert any('Command timeout sec' in item for item in summary)
+    assert summary[-1] == '7) Back'

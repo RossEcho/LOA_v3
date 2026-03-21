@@ -12,6 +12,7 @@ from loa_v3.orchestrator import Orchestrator
 from loa_v3.planner import FallbackPlanner, ModelBackedPlanner, _build_planner_catalog, _derive_goal_hints
 from loa_v3.prompt_registry import PromptRegistry
 from loa_v3.reporter import Reporter
+from loa_v3.tool_introspection import build_cli_metadata
 from loa_v3.tool_registry import ToolRegistry
 from loa_v3.tool_runner import ToolRunner
 from loa_v3.tool_selector import ToolSelector
@@ -140,6 +141,20 @@ def test_goal_hints_distinguish_onboard_only_from_use() -> None:
     assert combined['requested_actions'] == ['onboard_tool', 'use_tool']
 
 
+def test_build_cli_metadata_infers_structured_help_details() -> None:
+    help_output = '''Usage: ping [options] <destination>
+  -c <count>         stop after sending count packets
+  -i <interval>      wait interval seconds between sending each packet
+  -W <timeout>       time to wait for response
+'''
+    metadata = build_cli_metadata('ping', '/usr/bin/ping', help_output, 'ping version', {'help_command': ['ping', '-h']})
+    assert metadata['input_contract'] == {'destination': 'string'}
+    assert metadata['required_args'] == ['destination']
+    assert metadata['execution']['long_running_by_default'] is True
+    assert metadata['execution']['safe_default_flags'] == ['-c', '4']
+    assert metadata['optional_args'][0]['flags'][0] == '-c'
+
+
 def test_tool_registry_exposes_three_tool_types() -> None:
     registry = ToolRegistry(PROJECT_ROOT)
     tool_types = {tool.tool_type for tool in registry.list_tools()}
@@ -149,9 +164,73 @@ def test_tool_registry_exposes_three_tool_types() -> None:
 
 def test_tool_registry_enriches_generic_cli_and_onboarder_metadata() -> None:
     registry = ToolRegistry(PROJECT_ROOT)
-    assert registry.get('ping').metadata['input_contract'] == {'arg_1': 'string'}
+    ping = registry.get('ping')
+    assert ping.metadata['input_contract']
+    assert 'execution' in ping.metadata
+    assert ping.metadata['required_args'] == list(ping.metadata['input_contract'].keys())
     assert registry.get('tool_onboarder').metadata['input_contract'] == {'tool_name': 'string'}
     assert registry.get('tool_onboarder').metadata['capabilities']['adds_cli_tools'] is True
+
+
+def test_tool_runner_uses_runtime_default_timeout_when_manifest_omits_it(tmp_path: Path) -> None:
+    project_root = tmp_path / 'project_timeout'
+    project_root.mkdir()
+    (project_root / 'tool_manifests').mkdir()
+    script_path = project_root / 'echo_timeout.py'
+    script_path.write_text('import sys\nprint("ok")\n', encoding='utf-8')
+    (project_root / 'tool_manifests' / 'echo_timeout.json').write_text(json.dumps({
+        'name': 'echo_timeout',
+        'tool_type': 1,
+        'description': 'Echo for timeout tests.',
+        'command_template': [sys.executable, str(script_path)],
+        'metadata': {
+            'input_contract': {'arg_1': 'string'},
+            'argument_order': ['arg_1'],
+            'execution': {
+                'long_running_by_default': False,
+                'safe_default_flags': [],
+            },
+        },
+    }, ensure_ascii=False), encoding='utf-8')
+    registry = ToolRegistry(project_root)
+    limits = RuntimeLimits(max_steps=2, allow_network=True, command_timeout_sec=90)
+    runner = ToolRunner(project_root, registry, limits)
+    assert runner._resolve_timeout(registry.get('echo_timeout')) == 90
+
+
+def test_tool_runner_uses_safe_default_flags_from_manifest(tmp_path: Path) -> None:
+    project_root = tmp_path / 'project'
+    project_root.mkdir()
+    (project_root / 'tool_manifests').mkdir()
+    script_path = project_root / 'echo_args.py'
+    script_path.write_text('import json, sys\nprint(json.dumps(sys.argv[1:]))\n', encoding='utf-8')
+    (project_root / 'tool_manifests' / 'echo_args.json').write_text(json.dumps({
+        'name': 'echo_args',
+        'tool_type': 1,
+        'description': 'Echo argv for tests.',
+        'command_template': [sys.executable, str(script_path)],
+        'metadata': {
+            'input_contract': {'destination': 'string'},
+            'argument_order': ['destination'],
+            'execution': {
+                'long_running_by_default': True,
+                'safe_default_flags': ['--count', '4'],
+                'default_timeout_sec': 30,
+            },
+        },
+    }, ensure_ascii=False), encoding='utf-8')
+    registry = ToolRegistry(project_root)
+    runner = ToolRunner(project_root, registry, RuntimeLimits(max_steps=2, allow_network=True))
+    outcome = runner.run_step(PlanStep(
+        id='step_1',
+        title='Echo args',
+        objective='Verify safe default flags are included.',
+        tool_name='echo_args',
+        tool_input={'destination': '8.8.8.8'},
+        expected_outcome='The runner passes safe flags before user args.',
+    ))
+    assert outcome.exit_code == 0
+    assert json.loads(outcome.stdout.strip()) == ['--count', '4', '8.8.8.8']
 
 
 def test_fallback_planner_has_no_generic_execution_step() -> None:

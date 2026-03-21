@@ -28,6 +28,7 @@ class RuntimeLimits:
     allow_privilege_escalation: bool = False
     stop_on_no_progress: bool = True
     stop_on_step_failure: bool = True
+    command_timeout_sec: int = 90
 
 
 @dataclass(slots=True)
