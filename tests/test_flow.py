@@ -36,7 +36,7 @@ def build_test_orchestrator() -> Orchestrator:
 
 def test_generic_prompt_without_model_does_not_execute_fake_fallback_step() -> None:
     orchestrator = build_test_orchestrator()
-    result = orchestrator.run('use ping on 8.8.8.8', debug=True)
+    result = orchestrator.run('list network status', debug=True)
 
     assert result.plan.planning_mode == 'fallback'
     assert result.plan.steps == []
@@ -44,6 +44,26 @@ def test_generic_prompt_without_model_does_not_execute_fake_fallback_step() -> N
     assert result.evaluation.success is False
     assert result.evaluation.needs_replan is True
     assert 'Model planning did not produce an executable plan.' == result.evaluation.reason
+
+
+def test_explicit_ping_prompt_maps_to_tool_step() -> None:
+    registry = ToolRegistry(PROJECT_ROOT)
+    registry_path = PROJECT_ROOT / 'tool_manifests' / 'ping.json'
+    if not registry_path.exists():
+        registry_path.write_text(json.dumps({
+            'name': 'ping',
+            'tool_type': 1,
+            'description': 'CLI tool manifest for ping.',
+            'command_template': ['ping'],
+            'metadata': {'detected': True, 'path': 'ping'},
+        }, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    orchestrator = build_test_orchestrator()
+    result = orchestrator.run('ping 8.8.8.8', debug=True)
+
+    assert result.plan.planning_mode == 'rule_based'
+    assert result.plan.steps[0].tool_name == 'ping'
+    assert result.plan.steps[0].tool_input == {'target': '8.8.8.8'}
 
 
 def test_tool_registry_exposes_three_tool_types() -> None:
@@ -93,5 +113,5 @@ def test_add_tool_prompt_creates_manifest_for_detected_cli() -> None:
 
 def test_report_includes_planning_mode() -> None:
     orchestrator = build_test_orchestrator()
-    result = orchestrator.run('use ping on 8.8.8.8', debug=True)
+    result = orchestrator.run('list network status', debug=True)
     assert 'Planning mode: fallback' in result.report

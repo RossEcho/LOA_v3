@@ -22,24 +22,71 @@ def _extract_add_tool_name(user_prompt: str) -> str | None:
     return match.group(1)
 
 
-def _rule_based_plan(user_prompt: str) -> Plan | None:
-    tool_name = _extract_add_tool_name(user_prompt)
-    if not tool_name:
+def _extract_direct_tool_call(user_prompt: str, tools: list[dict]) -> tuple[str, dict[str, Any], str] | None:
+    prompt = (user_prompt or '').strip()
+    tool_names = {str(tool.get('name')) for tool in tools if isinstance(tool, dict)}
+
+    ping_patterns = [
+        r'^\s*ping\s+([^\s]+)\s*$',
+        r'^\s*use\s+ping\s+on\s+([^\s]+)\s*$',
+        r'^\s*use\s+ping\s+for\s+([^\s]+)\s*$',
+    ]
+    if 'ping' in tool_names:
+        for pattern in ping_patterns:
+            match = re.match(pattern, prompt, flags=re.IGNORECASE)
+            if match:
+                target = match.group(1)
+                return 'ping', {'target': target}, f'Ping the target {target}.'
+
+    direct_match = re.match(r'^\s*(?:use\s+)?([A-Za-z0-9._+-]+)\s+([^\s].*)$', prompt, flags=re.IGNORECASE)
+    if not direct_match:
         return None
+    tool_name = direct_match.group(1)
+    raw_arg = direct_match.group(2).strip()
+    if tool_name not in tool_names or tool_name in {'shell', 'tool_manager'}:
+        return None
+    return tool_name, {'arg_1': raw_arg}, f'Run {tool_name} with argument {raw_arg}.'
+
+
+def _rule_based_plan(user_prompt: str, tools: list[dict]) -> Plan | None:
+    tool_name = _extract_add_tool_name(user_prompt)
+    if tool_name:
+        return Plan(
+            id=new_id('plan'),
+            goal=user_prompt,
+            rationale=f"Rule-based planner detected a tool-onboarding request for '{tool_name}'.",
+            planning_mode='rule_based',
+            planner_note='Handled by local rule-based planner.',
+            steps=[
+                PlanStep(
+                    id='step_1',
+                    title='Register CLI tool',
+                    objective=f"Detect the '{tool_name}' executable and write a manifest entry for it.",
+                    tool_name='tool_manager',
+                    tool_input={'operation': 'register_cli', 'tool_name': tool_name},
+                    expected_outcome=f"A manifest for '{tool_name}' is created under tool_manifests.",
+                )
+            ],
+        )
+
+    direct_tool = _extract_direct_tool_call(user_prompt, tools)
+    if direct_tool is None:
+        return None
+    tool_name, tool_input, objective = direct_tool
     return Plan(
         id=new_id('plan'),
         goal=user_prompt,
-        rationale=f"Rule-based planner detected a tool-onboarding request for '{tool_name}'.",
+        rationale=f"Rule-based planner mapped the explicit tool request to '{tool_name}'.",
         planning_mode='rule_based',
-        planner_note='Handled by local rule-based planner.',
+        planner_note='Explicit tool invocation matched from the user prompt.',
         steps=[
             PlanStep(
                 id='step_1',
-                title='Register CLI tool',
-                objective=f"Detect the '{tool_name}' executable and write a manifest entry for it.",
-                tool_name='tool_manager',
-                tool_input={'operation': 'register_cli', 'tool_name': tool_name},
-                expected_outcome=f"A manifest for '{tool_name}' is created under tool_manifests.",
+                title=f'Run {tool_name}',
+                objective=objective,
+                tool_name=tool_name,
+                tool_input=tool_input,
+                expected_outcome=f"The tool '{tool_name}' runs successfully for the requested input.",
             )
         ],
     )
@@ -59,7 +106,7 @@ class FallbackPlanner(Planner):
         tools: list[dict],
         note: str = '',
     ) -> Plan:
-        rule_based = _rule_based_plan(user_prompt)
+        rule_based = _rule_based_plan(user_prompt, tools)
         if rule_based is not None:
             return rule_based
         planner_note = note or 'Model planner unavailable; no executable fallback plan was produced.'
@@ -81,7 +128,7 @@ class ModelBackedPlanner(Planner):
         self.fallback = FallbackPlanner()
 
     def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
-        rule_based = _rule_based_plan(user_prompt)
+        rule_based = _rule_based_plan(user_prompt, tools)
         if rule_based is not None:
             return rule_based
 
@@ -98,11 +145,11 @@ class ModelBackedPlanner(Planner):
         prompt = self.prompt_registry.render('planner_prompt', input_json=json.dumps(envelope, ensure_ascii=False, indent=2))
         try:
             payload = self.model_client.generate_json(prompt, schema=PLAN_SCHEMA)
-            return self._plan_from_payload(payload, user_prompt)
+            return self._plan_from_payload(payload, user_prompt, tools)
         except (ModelClientError, KeyError, TypeError, ValueError) as exc:
             return self.fallback.build_plan(user_prompt, runtime_limits=runtime_limits, tools=tools, note=f'model planning failed: {exc}')
 
-    def _plan_from_payload(self, payload: dict[str, Any], user_prompt: str) -> Plan:
+    def _plan_from_payload(self, payload: dict[str, Any], user_prompt: str, tools: list[dict]) -> Plan:
         steps: list[PlanStep] = []
         for index, raw in enumerate(payload.get('steps', []), start=1):
             if not isinstance(raw, dict):
@@ -119,7 +166,7 @@ class ModelBackedPlanner(Planner):
             )
 
         if not steps:
-            return self.fallback.build_plan(user_prompt, runtime_limits=RuntimeLimits(), tools=[], note='model returned no executable steps')
+            return self.fallback.build_plan(user_prompt, runtime_limits=RuntimeLimits(), tools=tools, note='model returned no executable steps')
 
         return Plan(
             id=str(payload.get('id') or new_id('plan')),

@@ -33,7 +33,7 @@ def build_app(*, debug: bool = False) -> Orchestrator:
     selector = ToolSelector(registry)
     runner = ToolRunner(PROJECT_ROOT, registry, runtime_limits)
     evaluator = Evaluator()
-    reporter = Reporter(prompt_registry, model_client=model_client)
+    reporter = Reporter(prompt_registry, model_client=None)
     logger = SessionLogger(PROJECT_ROOT)
     return Orchestrator(
         planner=planner,
@@ -54,7 +54,8 @@ def run_flow(*, debug: bool = False) -> int:
     app = build_app(debug=debug)
     result = app.run(prompt, debug=debug)
     print(result.report)
-    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if debug:
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     return 0
 
 
