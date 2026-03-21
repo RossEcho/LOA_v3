@@ -1,0 +1,14 @@
+﻿{
+  "name": "echo_script",
+  "tool_type": 2,
+  "description": "Example script tool manifest placeholder.",
+  "command_template": [
+    "powershell",
+    "-Command",
+    "Write-Output"
+  ],
+  "metadata": {
+    "manifest_required": true,
+    "example": true
+  }
+}

@@ -1,0 +1,21 @@
+﻿{
+  "model": {
+    "backend": "llama-server",
+    "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+    "model_name": "local",
+    "timeout_sec": 90,
+    "max_tokens": 512,
+    "temperature": 0.0,
+    "seed": 0,
+    "use_schema": false
+  },
+  "runtime": {
+    "max_steps": 6,
+    "allow_network": false,
+    "allow_file_write": false,
+    "allow_privilege_escalation": false,
+    "stop_on_no_progress": true,
+    "stop_on_step_failure": true,
+    "debug": false
+  }
+}
