@@ -81,7 +81,7 @@ def test_model_can_choose_ping_tool_step() -> None:
                 'title': 'Run ping',
                 'objective': 'Ping 8.8.8.8.',
                 'tool_name': 'ping',
-                'tool_input': {'target': '8.8.8.8'},
+                'tool_input': {'arg_1': '8.8.8.8'},
                 'expected_outcome': 'Ping succeeds.'
             }
         ]
@@ -123,8 +123,8 @@ def test_planner_catalog_includes_onboarding_hints() -> None:
     registry = ToolRegistry(PROJECT_ROOT)
     catalog = _build_planner_catalog(registry.build_planning_metadata())
     hints = '\n'.join(catalog['planning_hints'])
-    assert 'tool_onboarder' in hints
-    assert 'ping' in hints
+    assert 'onboarding script' in hints
+    assert 'multiple steps' in hints
 
 
 def test_tool_registry_exposes_three_tool_types() -> None:
@@ -134,10 +134,11 @@ def test_tool_registry_exposes_three_tool_types() -> None:
     assert registry.get('tool_onboarder').tool_type == 2
 
 
-def test_tool_registry_enriches_ping_and_onboarder_metadata() -> None:
+def test_tool_registry_enriches_generic_cli_and_onboarder_metadata() -> None:
     registry = ToolRegistry(PROJECT_ROOT)
-    assert registry.get('ping').metadata['input_contract'] == {'target': 'string'}
+    assert registry.get('ping').metadata['input_contract'] == {'arg_1': 'string'}
     assert registry.get('tool_onboarder').metadata['input_contract'] == {'tool_name': 'string'}
+    assert registry.get('tool_onboarder').metadata['capabilities']['adds_cli_tools'] is True
 
 
 def test_fallback_planner_has_no_generic_execution_step() -> None:

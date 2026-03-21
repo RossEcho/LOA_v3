@@ -10,12 +10,12 @@ from loa_v3.types import ToolDefinition
 
 def _enrich_tool_metadata(tool: ToolDefinition) -> ToolDefinition:
     metadata = dict(tool.metadata)
-    if tool.name == 'ping' and 'input_contract' not in metadata:
-        metadata['input_contract'] = {'target': 'string'}
-        metadata['usage_hint'] = 'Use for connectivity checks such as pinging a host or IP address.'
-    if tool.name == 'tool_onboarder' and 'input_contract' not in metadata:
-        metadata['input_contract'] = {'tool_name': 'string'}
-        metadata['usage_hint'] = 'Use when the user asks to add, install, or register a CLI tool.'
+    if tool.tool_type == 1 and 'input_contract' not in metadata:
+        metadata['input_contract'] = {'arg_1': 'string'}
+    if tool.tool_type == 1 and 'usage_hint' not in metadata:
+        metadata['usage_hint'] = 'Generic CLI tool. Use arg_1 for the main positional argument unless the manifest specifies more structured inputs.'
+    if tool.tool_type == 2 and 'usage_hint' not in metadata:
+        metadata['usage_hint'] = 'Script tool with structured inputs defined in metadata.input_contract.'
     return ToolDefinition(
         name=tool.name,
         tool_type=tool.tool_type,
@@ -51,6 +51,7 @@ class ToolRegistry:
                 'version': sys.version.split()[0],
                 'help_hint': '--help',
                 'input_contract': {'arg_1': 'string'},
+                'usage_hint': 'Generic CLI tool. Use arg_1 for the main positional argument.',
             },
         )
 

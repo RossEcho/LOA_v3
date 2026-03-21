@@ -23,33 +23,38 @@ def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
         'master_tools': [],
         'planning_hints': [],
     }
+    onboarding_tools: list[str] = []
     for tool in tools:
         if not isinstance(tool, dict):
             continue
+        metadata = tool.get('metadata') or {}
         entry = {
             'name': tool.get('name'),
             'description': tool.get('description'),
-            'input_contract': (tool.get('metadata') or {}).get('input_contract', {}),
-            'usage_hint': (tool.get('metadata') or {}).get('usage_hint', ''),
+            'input_contract': metadata.get('input_contract', {}),
+            'usage_hint': metadata.get('usage_hint', ''),
+            'capabilities': metadata.get('capabilities', {}),
         }
         tool_type = tool.get('tool_type')
         if tool_type == 2:
             catalog['script_tools'].append(entry)
+            capabilities = metadata.get('capabilities') or {}
+            if capabilities.get('adds_cli_tools'):
+                onboarding_tools.append(str(tool.get('name')))
         elif tool_type == 1:
             catalog['cli_tools'].append(entry)
         else:
             catalog['master_tools'].append(entry)
 
-    if 'tool_onboarder' in available_names:
+    if onboarding_tools:
         catalog['planning_hints'].append(
-            'If the user asks to add, install, or register a tool, prefer a plan that uses tool_onboarder first.'
+            'If the user asks to add, install, or register a tool, prefer an onboarding-capable script tool first.'
         )
         catalog['planning_hints'].append(
-            'If onboarding is needed before use, multi-step plans are allowed: step 1 onboard the tool, step 2 use the new tool.'
+            'If the requested command is not yet available but an onboarding script can add CLI tools, you may plan multiple steps: first onboard the command, then use it.'
         )
-    if 'ping' in available_names:
         catalog['planning_hints'].append(
-            'If the user asks to ping a host and ping is available, produce a ping step with tool_input.target.'
+            'Onboarding-capable script tools: ' + ', '.join(onboarding_tools)
         )
     return catalog
 

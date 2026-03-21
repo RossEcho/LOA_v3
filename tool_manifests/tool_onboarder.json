@@ -1,13 +1,18 @@
 ﻿{
   "name": "tool_onboarder",
   "tool_type": 2,
-  "description": "Script tool that detects a CLI binary on PATH and writes a reusable manifest into tool_manifests. Use this when the user asks to add, install, or register a command-line tool.",
+  "description": "Script tool that detects a CLI binary on PATH and writes a reusable manifest into tool_manifests.",
   "command_template": [],
   "metadata": {
     "script_path": "scripts/tool_onboarder.py",
     "manifest_required": true,
     "input_contract": {
       "tool_name": "string"
+    },
+    "usage_hint": "Use when the user asks to add, install, or register a command-line tool.",
+    "capabilities": {
+      "adds_cli_tools": true,
+      "writes_tool_manifests": true
     }
   }
 }
