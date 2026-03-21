@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any
 
@@ -19,6 +20,34 @@ def _default_inspect_command() -> list[str]:
     return [sys.executable, '-c', 'import os; print(os.getcwd())']
 
 
+def _extract_add_tool_name(user_prompt: str) -> str | None:
+    match = re.match(r'^\s*(?:add|install|register)\s+tool\s+([A-Za-z0-9._+-]+)\s*$', user_prompt or '', flags=re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _rule_based_plan(user_prompt: str) -> Plan | None:
+    tool_name = _extract_add_tool_name(user_prompt)
+    if not tool_name:
+        return None
+    return Plan(
+        id=new_id('plan'),
+        goal=user_prompt,
+        rationale=f"Rule-based planner detected a tool-onboarding request for '{tool_name}'.",
+        steps=[
+            PlanStep(
+                id='step_1',
+                title='Register CLI tool',
+                objective=f"Detect the '{tool_name}' executable and write a manifest entry for it.",
+                tool_name='tool_manager',
+                tool_input={'operation': 'register_cli', 'tool_name': tool_name},
+                expected_outcome=f"A manifest for '{tool_name}' is created under tool_manifests.",
+            )
+        ],
+    )
+
+
 class Planner:
     def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
         raise NotImplementedError
@@ -26,6 +55,9 @@ class Planner:
 
 class FallbackPlanner(Planner):
     def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
+        rule_based = _rule_based_plan(user_prompt)
+        if rule_based is not None:
+            return rule_based
         step = PlanStep(
             id='step_1',
             title='Inspect working directory',
@@ -49,6 +81,10 @@ class ModelBackedPlanner(Planner):
         self.fallback = FallbackPlanner()
 
     def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
+        rule_based = _rule_based_plan(user_prompt)
+        if rule_based is not None:
+            return rule_based
+
         envelope = {
             'user_prompt': user_prompt,
             'runtime_limits': {

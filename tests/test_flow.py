@@ -1,6 +1,9 @@
 ﻿from __future__ import annotations
 
+import json
 from pathlib import Path
+import shutil
+import sys
 
 from loa_v3.evaluator import Evaluator
 from loa_v3.logger import SessionLogger
@@ -67,3 +70,19 @@ def test_missing_command_becomes_tool_failure_instead_of_crash() -> None:
     record = orchestrator._execute_step(bad_step)
     assert record.status == 'failed'
     assert 'command execution failed' in record.anomalies[0]
+
+
+def test_add_tool_prompt_creates_manifest_for_detected_cli() -> None:
+    candidate = 'python' if shutil.which('python') else Path(sys.executable).name
+    manifest_path = PROJECT_ROOT / 'tool_manifests' / f'{candidate}.json'
+    if manifest_path.exists():
+        manifest_path.unlink()
+
+    orchestrator = build_test_orchestrator()
+    result = orchestrator.run(f'add tool {candidate}', debug=True)
+
+    assert result.evaluation.success is True
+    assert manifest_path.exists()
+    payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+    assert payload['name'] == candidate
+    assert payload['tool_type'] == 1
