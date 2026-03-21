@@ -6,6 +6,14 @@ from loa_v3.types import Evaluation, ExecutionRecord, Plan, RuntimeLimits
 class Evaluator:
     def evaluate(self, plan: Plan, records: list[ExecutionRecord], limits: RuntimeLimits) -> Evaluation:
         if not records:
+            if plan.planning_mode == 'fallback':
+                return Evaluation(
+                    complete=False,
+                    success=False,
+                    needs_replan=True,
+                    reason='Model planning did not produce an executable plan.',
+                    anomalies=['planner_fallback', plan.planner_note or 'model_planning_unavailable'],
+                )
             return Evaluation(
                 complete=False,
                 success=False,

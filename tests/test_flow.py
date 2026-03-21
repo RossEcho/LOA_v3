@@ -34,14 +34,16 @@ def build_test_orchestrator() -> Orchestrator:
     )
 
 
-def test_fallback_flow_runs_and_creates_report() -> None:
+def test_generic_prompt_without_model_does_not_execute_fake_fallback_step() -> None:
     orchestrator = build_test_orchestrator()
-    result = orchestrator.run('show me the current directory', debug=True)
+    result = orchestrator.run('use ping on 8.8.8.8', debug=True)
 
-    assert result.evaluation.complete is True
-    assert result.evaluation.success is True
-    assert 'Goal:' in result.report
-    assert Path(result.session_dir).exists()
+    assert result.plan.planning_mode == 'fallback'
+    assert result.plan.steps == []
+    assert result.records == []
+    assert result.evaluation.success is False
+    assert result.evaluation.needs_replan is True
+    assert 'Model planning did not produce an executable plan.' == result.evaluation.reason
 
 
 def test_tool_registry_exposes_three_tool_types() -> None:
@@ -50,10 +52,10 @@ def test_tool_registry_exposes_three_tool_types() -> None:
     assert {0, 1, 2}.issubset(tool_types)
 
 
-def test_fallback_planner_uses_portable_python_command() -> None:
+def test_fallback_planner_has_no_generic_execution_step() -> None:
     plan = FallbackPlanner().build_plan('inspect', runtime_limits=RuntimeLimits(), tools=[])
-    assert plan.steps[0].tool_input['command'][0]
-    assert '-c' in plan.steps[0].tool_input['command']
+    assert plan.planning_mode == 'fallback'
+    assert plan.steps == []
 
 
 def test_missing_command_becomes_tool_failure_instead_of_crash() -> None:
@@ -81,8 +83,15 @@ def test_add_tool_prompt_creates_manifest_for_detected_cli() -> None:
     orchestrator = build_test_orchestrator()
     result = orchestrator.run(f'add tool {candidate}', debug=True)
 
+    assert result.plan.planning_mode == 'rule_based'
     assert result.evaluation.success is True
     assert manifest_path.exists()
     payload = json.loads(manifest_path.read_text(encoding='utf-8'))
     assert payload['name'] == candidate
     assert payload['tool_type'] == 1
+
+
+def test_report_includes_planning_mode() -> None:
+    orchestrator = build_test_orchestrator()
+    result = orchestrator.run('use ping on 8.8.8.8', debug=True)
+    assert 'Planning mode: fallback' in result.report

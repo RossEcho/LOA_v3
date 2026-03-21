@@ -17,6 +17,7 @@ def new_id(prefix: str) -> str:
 
 ToolType = Literal[0, 1, 2]
 StepStatus = Literal["pending", "running", "success", "failed", "skipped"]
+PlanningMode = Literal["model", "rule_based", "fallback"]
 
 
 @dataclass(slots=True)
@@ -68,6 +69,8 @@ class Plan:
     goal: str
     rationale: str
     requires_replan: bool = False
+    planning_mode: PlanningMode = "fallback"
+    planner_note: str = ""
     steps: list[PlanStep] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,6 +79,8 @@ class Plan:
             "goal": self.goal,
             "rationale": self.rationale,
             "requires_replan": self.requires_replan,
+            "planning_mode": self.planning_mode,
+            "planner_note": self.planner_note,
             "steps": [step.to_dict() for step in self.steps],
         }
 

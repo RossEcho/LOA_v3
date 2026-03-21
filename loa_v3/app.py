@@ -33,7 +33,7 @@ def build_app(*, debug: bool = False) -> Orchestrator:
     selector = ToolSelector(registry)
     runner = ToolRunner(PROJECT_ROOT, registry, runtime_limits)
     evaluator = Evaluator()
-    reporter = Reporter(prompt_registry, model_client=None)
+    reporter = Reporter(prompt_registry, model_client=model_client)
     logger = SessionLogger(PROJECT_ROOT)
     return Orchestrator(
         planner=planner,

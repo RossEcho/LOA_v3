@@ -16,6 +16,8 @@ class Reporter:
         summary = {
             'goal': plan.goal,
             'plan_id': plan.id,
+            'planning_mode': plan.planning_mode,
+            'planner_note': plan.planner_note,
             'steps_total': len(plan.steps),
             'steps_executed': len(records),
             'evaluation': evaluation.to_dict(),
@@ -31,10 +33,13 @@ class Reporter:
                 pass
 
         lines = [
-            f'Goal: {plan.goal}',
-            f'Status: {'success' if evaluation.success else 'failure'}',
-            f'Reason: {evaluation.reason}',
+            f"Goal: {plan.goal}",
+            f"Status: {'success' if evaluation.success else 'failure'}",
+            f"Reason: {evaluation.reason}",
+            f"Planning mode: {plan.planning_mode}",
         ]
+        if plan.planner_note:
+            lines.append(f"Planner note: {plan.planner_note}")
         for record in records:
             outcome = record.outcome
             if outcome is None:
