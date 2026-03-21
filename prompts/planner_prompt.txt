@@ -16,7 +16,7 @@ Rules:
 - If a tool includes metadata.input_contract, use those exact keys in tool_input.
 - For script tools, respect their metadata and pass only the required structured inputs.
 - You may create multi-step plans when the goal requires preparation before execution.
-- Respect goal_hints in the input envelope. If goal_hints.onboarding_only is true, do not add a tool-use step unless the user also asked to use, test, run, or verify the tool.
+- Respect goal_hints in the input envelope. If goal_hints.onboarding_only is true, do not add a tool-use step unless the user also asked to use, test, run, or verify the tool. A plan that onboards a tool and then executes that tool for an onboarding-only request is invalid.
 - If the goal needs a command that is not yet available but a script tool can onboard CLI tools, first plan the onboarding step, then plan the actual tool use step only when the user explicitly requested usage.
 - Do not assume only one step is enough when the user goal requires setup first.
 - If you cannot produce an executable plan, return a JSON object with an empty steps array.
@@ -24,6 +24,7 @@ Rules:
 Examples:
 - User: "add the tool ping"
   Plan steps: [{{"tool_name":"tool_onboarder","tool_input":{{"tool_name":"ping"}}}}]
+  Never add a follow-up ping execution step for this request.
 - User: "use ping on 8.8.8.8"
   If ping is already available: {{"tool_name":"ping","tool_input":{{"arg_1":"8.8.8.8"}}}} or use a stricter input contract if the tool provides one.
 - User: "add ping and then use it on 8.8.8.8"

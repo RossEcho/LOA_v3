@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -22,6 +24,51 @@ def _normalize_text(value) -> str:
 
 
 class ToolRunner:
+    def _run_command(self, command: list[str], timeout_sec: int) -> dict[str, object]:
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=str(self.project_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+                check=False,
+            )
+            return {
+                'exit_code': proc.returncode,
+                'stdout': _normalize_text(proc.stdout),
+                'stderr': _normalize_text(proc.stderr),
+                'command': command,
+                'timed_out': False,
+            }
+        except subprocess.TimeoutExpired as exc:
+            return {
+                'exit_code': -9,
+                'stdout': _normalize_text(exc.stdout),
+                'stderr': _normalize_text(exc.stderr) + f'\nTimed out after {timeout_sec}s',
+                'command': command,
+                'timed_out': True,
+            }
+        except OSError as exc:
+            raise ToolRunnerError(f'command execution failed: {exc}') from exc
+
+    def _should_retry_with_su(self, outcome: dict[str, object]) -> bool:
+        if not self.limits.allow_privilege_escalation:
+            return False
+        if sys.platform.startswith('win'):
+            return False
+        stderr = str(outcome.get('stderr', '')).lower()
+        exit_code = int(outcome.get('exit_code', 0))
+        if 'permission denied' in stderr or 'operation not permitted' in stderr:
+            return True
+        return exit_code in {126, 13}
+
+    def _wrap_with_su(self, command: list[str]) -> list[str] | None:
+        su_path = shutil.which('su')
+        if not su_path:
+            return None
+        return [su_path, '-c', shlex.join(command)]
+
     def __init__(self, project_root: Path, registry: ToolRegistry, limits: RuntimeLimits) -> None:
         self.project_root = project_root
         self.registry = registry
@@ -34,34 +81,19 @@ class ToolRunner:
         timeout_sec = self._resolve_timeout(tool)
 
         started = time.perf_counter()
-        try:
-            proc = subprocess.run(
-                command,
-                cwd=str(self.project_root),
-                capture_output=True,
-                text=True,
-                timeout=timeout_sec,
-                check=False,
-            )
-            timed_out = False
-            stdout = _normalize_text(proc.stdout)
-            stderr = _normalize_text(proc.stderr)
-            exit_code = proc.returncode
-        except subprocess.TimeoutExpired as exc:
-            timed_out = True
-            stdout = _normalize_text(exc.stdout)
-            stderr = _normalize_text(exc.stderr) + f'\nTimed out after {timeout_sec}s'
-            exit_code = -9
-        except OSError as exc:
-            raise ToolRunnerError(f'command execution failed: {exc}') from exc
+        outcome = self._run_command(command, timeout_sec)
+        if self._should_retry_with_su(outcome):
+            su_command = self._wrap_with_su(command)
+            if su_command is not None:
+                outcome = self._run_command(su_command, timeout_sec)
 
         return StepOutcome(
-            exit_code=exit_code,
-            stdout=stdout,
-            stderr=stderr,
-            command=command,
+            exit_code=outcome['exit_code'],
+            stdout=outcome['stdout'],
+            stderr=outcome['stderr'],
+            command=outcome['command'],
             duration_sec=time.perf_counter() - started,
-            timed_out=timed_out,
+            timed_out=outcome['timed_out'],
         )
 
     def _build_command(self, tool: ToolDefinition, step: PlanStep) -> list[str]:

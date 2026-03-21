@@ -93,6 +93,37 @@ def test_model_can_choose_ping_tool_step() -> None:
     assert result.plan.steps[0].tool_name == 'ping'
 
 
+def test_onboarding_only_goal_trims_invalid_model_execution_steps() -> None:
+    payload = json.dumps({
+        'id': 'plan_invalid_extra_use',
+        'goal': 'add tool ping',
+        'rationale': 'Model incorrectly added a use step.',
+        'steps': [
+            {
+                'id': 'step_0',
+                'title': 'Onboard ping',
+                'objective': 'Register ping as a tool.',
+                'tool_name': 'tool_onboarder',
+                'tool_input': {'tool_name': 'ping'},
+                'expected_outcome': 'A manifest is created.',
+            },
+            {
+                'id': 'step_1',
+                'title': 'Use ping',
+                'objective': 'Run ping even though the user did not ask for that.',
+                'tool_name': 'ping',
+                'tool_input': {'arg_1': '8.8.8.8'},
+                'expected_outcome': 'This step should be trimmed away.',
+            },
+        ],
+    })
+    planner = ModelBackedPlanner(StubModelClient(payload), PromptRegistry(PROJECT_ROOT / 'prompts'))
+    registry = ToolRegistry(PROJECT_ROOT)
+    plan = planner.build_plan('add tool ping', runtime_limits=RuntimeLimits(max_steps=3, allow_network=True), tools=registry.build_planning_metadata())
+    assert [step.tool_name for step in plan.steps] == ['tool_onboarder']
+    assert 'Goal boundary enforcement removed execution steps' in plan.planner_note
+
+
 def test_model_can_choose_tool_onboarder_script_tool() -> None:
     candidate = 'python' if shutil.which('python') else Path(sys.executable).name
     manifest_path = PROJECT_ROOT / 'tool_manifests' / f'{candidate}.json'
