@@ -8,6 +8,24 @@ import sys
 from loa_v3.types import ToolDefinition
 
 
+def _enrich_tool_metadata(tool: ToolDefinition) -> ToolDefinition:
+    metadata = dict(tool.metadata)
+    if tool.name == 'ping' and 'input_contract' not in metadata:
+        metadata['input_contract'] = {'target': 'string'}
+        metadata['usage_hint'] = 'Use for connectivity checks such as pinging a host or IP address.'
+    if tool.name == 'tool_onboarder' and 'input_contract' not in metadata:
+        metadata['input_contract'] = {'tool_name': 'string'}
+        metadata['usage_hint'] = 'Use when the user asks to add, install, or register a CLI tool.'
+    return ToolDefinition(
+        name=tool.name,
+        tool_type=tool.tool_type,
+        description=tool.description,
+        command_template=list(tool.command_template),
+        metadata=metadata,
+        manifest_path=tool.manifest_path,
+    )
+
+
 class ToolRegistry:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
@@ -32,6 +50,7 @@ class ToolRegistry:
                 'detected': sys.executable,
                 'version': sys.version.split()[0],
                 'help_hint': '--help',
+                'input_contract': {'arg_1': 'string'},
             },
         )
 
@@ -41,7 +60,7 @@ class ToolRegistry:
             return
         for path in sorted(manifest_root.glob('*.json')):
             payload = json.loads(path.read_text(encoding='utf-8-sig'))
-            self._tools[payload['name']] = ToolDefinition(
+            tool = ToolDefinition(
                 name=payload['name'],
                 tool_type=int(payload['tool_type']),
                 description=payload['description'],
@@ -49,6 +68,7 @@ class ToolRegistry:
                 metadata=dict(payload.get('metadata', {})),
                 manifest_path=str(path),
             )
+            self._tools[payload['name']] = _enrich_tool_metadata(tool)
 
     def list_tools(self) -> list[ToolDefinition]:
         return [self._tools[name] for name in sorted(self._tools)]

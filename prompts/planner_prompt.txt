@@ -11,5 +11,22 @@ Each step must contain:
 - tool_input
 - expected_outcome
 
+Rules:
+- Use only tools listed in the input envelope.
+- If a tool includes metadata.input_contract, use those exact keys in tool_input.
+- For script tools, respect their metadata and pass only the required structured inputs.
+- You may create multi-step plans when the goal requires preparation before execution.
+- If the user needs a tool that is not yet usable but `tool_onboarder` exists, you may plan: onboard tool -> use tool.
+- If the user asks to ping a host and the `ping` tool is available, produce a `ping` step with `tool_input.target`.
+- If you cannot produce an executable plan, return a JSON object with an empty steps array.
+
+Examples:
+- User: "add the tool ping"
+  Plan step: {{"tool_name":"tool_onboarder","tool_input":{{"tool_name":"ping"}}}}
+- User: "use ping on 8.8.8.8"
+  Plan step: {{"tool_name":"ping","tool_input":{{"target":"8.8.8.8"}}}}
+- User: "add ping and then use it on 8.8.8.8"
+  Plan steps: [{{"tool_name":"tool_onboarder","tool_input":{{"tool_name":"ping"}}}}, {{"tool_name":"ping","tool_input":{{"target":"8.8.8.8"}}}}]
+
 Use this input envelope:
 {input_json}

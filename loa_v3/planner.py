@@ -14,6 +14,46 @@ PLAN_SCHEMA: dict[str, Any] = {
 }
 
 
+def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
+    available_names = [str(tool.get('name')) for tool in tools if isinstance(tool, dict) and tool.get('name')]
+    catalog = {
+        'available_tool_names': available_names,
+        'script_tools': [],
+        'cli_tools': [],
+        'master_tools': [],
+        'planning_hints': [],
+    }
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        entry = {
+            'name': tool.get('name'),
+            'description': tool.get('description'),
+            'input_contract': (tool.get('metadata') or {}).get('input_contract', {}),
+            'usage_hint': (tool.get('metadata') or {}).get('usage_hint', ''),
+        }
+        tool_type = tool.get('tool_type')
+        if tool_type == 2:
+            catalog['script_tools'].append(entry)
+        elif tool_type == 1:
+            catalog['cli_tools'].append(entry)
+        else:
+            catalog['master_tools'].append(entry)
+
+    if 'tool_onboarder' in available_names:
+        catalog['planning_hints'].append(
+            'If the user asks to add, install, or register a tool, prefer a plan that uses tool_onboarder first.'
+        )
+        catalog['planning_hints'].append(
+            'If onboarding is needed before use, multi-step plans are allowed: step 1 onboard the tool, step 2 use the new tool.'
+        )
+    if 'ping' in available_names:
+        catalog['planning_hints'].append(
+            'If the user asks to ping a host and ping is available, produce a ping step with tool_input.target.'
+        )
+    return catalog
+
+
 class Planner:
     def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
         raise NotImplementedError
@@ -55,6 +95,7 @@ class ModelBackedPlanner(Planner):
                 'allow_file_write': runtime_limits.allow_file_write,
                 'allow_privilege_escalation': runtime_limits.allow_privilege_escalation,
             },
+            'catalog': _build_planner_catalog(tools),
             'tools': tools,
         }
         prompt = self.prompt_registry.render('planner_prompt', input_json=json.dumps(envelope, ensure_ascii=False, indent=2))

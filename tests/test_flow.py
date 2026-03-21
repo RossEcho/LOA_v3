@@ -9,7 +9,7 @@ from loa_v3.evaluator import Evaluator
 from loa_v3.logger import SessionLogger
 from loa_v3.model_client import ModelClient
 from loa_v3.orchestrator import Orchestrator
-from loa_v3.planner import FallbackPlanner, ModelBackedPlanner
+from loa_v3.planner import FallbackPlanner, ModelBackedPlanner, _build_planner_catalog
 from loa_v3.prompt_registry import PromptRegistry
 from loa_v3.reporter import Reporter
 from loa_v3.tool_registry import ToolRegistry
@@ -119,11 +119,25 @@ def test_model_can_choose_tool_onboarder_script_tool() -> None:
     assert manifest_path.exists()
 
 
+def test_planner_catalog_includes_onboarding_hints() -> None:
+    registry = ToolRegistry(PROJECT_ROOT)
+    catalog = _build_planner_catalog(registry.build_planning_metadata())
+    hints = '\n'.join(catalog['planning_hints'])
+    assert 'tool_onboarder' in hints
+    assert 'ping' in hints
+
+
 def test_tool_registry_exposes_three_tool_types() -> None:
     registry = ToolRegistry(PROJECT_ROOT)
     tool_types = {tool.tool_type for tool in registry.list_tools()}
     assert {0, 1, 2}.issubset(tool_types)
     assert registry.get('tool_onboarder').tool_type == 2
+
+
+def test_tool_registry_enriches_ping_and_onboarder_metadata() -> None:
+    registry = ToolRegistry(PROJECT_ROOT)
+    assert registry.get('ping').metadata['input_contract'] == {'target': 'string'}
+    assert registry.get('tool_onboarder').metadata['input_contract'] == {'tool_name': 'string'}
 
 
 def test_fallback_planner_has_no_generic_execution_step() -> None:
