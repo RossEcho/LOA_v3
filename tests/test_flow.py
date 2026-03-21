@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -9,7 +9,7 @@ from loa_v3.evaluator import Evaluator
 from loa_v3.logger import SessionLogger
 from loa_v3.model_client import ModelClient
 from loa_v3.orchestrator import Orchestrator
-from loa_v3.planner import FallbackPlanner, ModelBackedPlanner, _build_planner_catalog
+from loa_v3.planner import FallbackPlanner, ModelBackedPlanner, _build_planner_catalog, _derive_goal_hints
 from loa_v3.prompt_registry import PromptRegistry
 from loa_v3.reporter import Reporter
 from loa_v3.tool_registry import ToolRegistry
@@ -125,6 +125,19 @@ def test_planner_catalog_includes_onboarding_hints() -> None:
     hints = '\n'.join(catalog['planning_hints'])
     assert 'onboarding script' in hints
     assert 'multiple steps' in hints
+
+
+def test_goal_hints_distinguish_onboard_only_from_use() -> None:
+    onboarding = _derive_goal_hints('add the tool ping')
+    usage = _derive_goal_hints('try pinging 8.8.8.8')
+    combined = _derive_goal_hints('add ping and then use it on 8.8.8.8')
+
+    assert onboarding['onboarding_only'] is True
+    assert onboarding['requested_actions'] == ['onboard_tool']
+    assert usage['use_only'] is True
+    assert usage['requested_actions'] == ['use_tool']
+    assert combined['may_require_multi_step'] is True
+    assert combined['requested_actions'] == ['onboard_tool', 'use_tool']
 
 
 def test_tool_registry_exposes_three_tool_types() -> None:

@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from loa_v3.model_client import ModelClient, ModelClientError
@@ -12,6 +13,46 @@ PLAN_SCHEMA: dict[str, Any] = {
     'type': 'object',
     'required': ['id', 'goal', 'rationale', 'steps'],
 }
+
+
+def _derive_goal_hints(user_prompt: str) -> dict[str, Any]:
+    text = user_prompt.casefold()
+    onboarding_patterns = (
+        r'\badd\b',
+        r'\binstall\b',
+        r'\bregister\b',
+        r'\bonboard\b',
+        r'\bset up\b',
+    )
+    usage_patterns = (
+        r'\buse\b',
+        r'\brun\b',
+        r'\bexecute\b',
+        r'\btry\b',
+        r'\btest\b',
+    )
+
+    wants_onboarding = any(re.search(pattern, text) for pattern in onboarding_patterns)
+    wants_usage = any(re.search(pattern, text) for pattern in usage_patterns)
+    if not wants_onboarding and not wants_usage:
+        tokens = re.findall(r'[a-z0-9_.:-]+', text)
+        command_like = len(tokens) >= 2 and tokens[0] not in {'please', 'can', 'could', 'would', 'should'}
+        wants_usage = command_like
+
+    requested_actions: list[str] = []
+    if wants_onboarding:
+        requested_actions.append('onboard_tool')
+    if wants_usage:
+        requested_actions.append('use_tool')
+    if not requested_actions:
+        requested_actions.append('unknown')
+
+    return {
+        'requested_actions': requested_actions,
+        'onboarding_only': wants_onboarding and not wants_usage,
+        'use_only': wants_usage and not wants_onboarding,
+        'may_require_multi_step': wants_onboarding and wants_usage,
+    }
 
 
 def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
@@ -94,6 +135,7 @@ class ModelBackedPlanner(Planner):
     def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
         envelope = {
             'user_prompt': user_prompt,
+            'goal_hints': _derive_goal_hints(user_prompt),
             'runtime_limits': {
                 'max_steps': runtime_limits.max_steps,
                 'allow_network': runtime_limits.allow_network,
