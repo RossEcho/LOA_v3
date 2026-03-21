@@ -59,15 +59,29 @@ def run_flow(*, debug: bool = False) -> int:
     return 0
 
 
+def _parse_yes_no(value: str, current: bool) -> bool:
+    normalized = (value or '').strip().lower()
+    if not normalized:
+        return current
+    if normalized in {'y', 'yes', 'true', '1', 'on'}:
+        return True
+    if normalized in {'n', 'no', 'false', '0', 'off'}:
+        return False
+    return current
+
+
 def settings_menu() -> int:
     loader = SettingsLoader(PROJECT_ROOT)
     settings = loader.load()
     print(f'Settings file: {loader.settings_path}')
     print(json.dumps(settings, ensure_ascii=False, indent=2))
 
+    current_network = bool(settings['runtime'].get('allow_network', False))
+
     endpoint = input('llama-server endpoint (blank keeps current): ').strip()
     model_name = input('model name (blank keeps current): ').strip()
     max_steps = input('max steps (blank keeps current): ').strip()
+    allow_network = input(f"allow network? [Y/n] (current: {'on' if current_network else 'off'}): ").strip()
 
     if endpoint:
         settings['model']['endpoint'] = endpoint
@@ -75,6 +89,7 @@ def settings_menu() -> int:
         settings['model']['model_name'] = model_name
     if max_steps:
         settings['runtime']['max_steps'] = int(max_steps)
+    settings['runtime']['allow_network'] = _parse_yes_no(allow_network, current_network)
 
     loader.save(settings)
     print('Settings saved')

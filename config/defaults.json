@@ -11,7 +11,7 @@
   },
   "runtime": {
     "max_steps": 6,
-    "allow_network": false,
+    "allow_network": true,
     "allow_file_write": false,
     "allow_privilege_escalation": false,
     "stop_on_no_progress": true,

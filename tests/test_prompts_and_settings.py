@@ -21,3 +21,4 @@ def test_settings_loader_reads_defaults() -> None:
     settings = loader.load()
     assert settings['model']['endpoint'].startswith('http://')
     assert settings['runtime']['max_steps'] >= 1
+    assert settings['runtime']['allow_network'] is True
