@@ -23,13 +23,6 @@ class ToolRegistry:
             command_template=[],
             metadata={'restricted': True},
         )
-        self._tools['tool_manager'] = ToolDefinition(
-            name='tool_manager',
-            tool_type=0,
-            description='Internal tool for registering and managing CLI tools.',
-            command_template=[],
-            metadata={'internal': True},
-        )
         self._tools['python'] = ToolDefinition(
             name='python',
             tool_type=1,

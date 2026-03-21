@@ -7,6 +7,16 @@ from typing import Any
 from loa_v3.types import SessionPaths, utc_now
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode('utf-8', errors='replace')
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 class SessionLogger:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
@@ -32,7 +42,7 @@ class SessionLogger:
 
     def _append_jsonl(self, path: Path, payload: dict[str, Any]) -> None:
         with path.open('a', encoding='utf-8') as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False) + '\n')
+            handle.write(json.dumps(_json_safe(payload), ensure_ascii=False) + '\n')
 
     def log_summary(self, paths: SessionPaths, message: str) -> None:
         with paths.user_summary.open('a', encoding='utf-8') as handle:

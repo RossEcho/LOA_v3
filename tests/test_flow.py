@@ -7,8 +7,9 @@ import sys
 
 from loa_v3.evaluator import Evaluator
 from loa_v3.logger import SessionLogger
+from loa_v3.model_client import ModelClient
 from loa_v3.orchestrator import Orchestrator
-from loa_v3.planner import FallbackPlanner
+from loa_v3.planner import FallbackPlanner, ModelBackedPlanner
 from loa_v3.prompt_registry import PromptRegistry
 from loa_v3.reporter import Reporter
 from loa_v3.tool_registry import ToolRegistry
@@ -20,7 +21,15 @@ from loa_v3.types import PlanStep, RuntimeLimits
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def build_test_orchestrator() -> Orchestrator:
+class StubModelClient(ModelClient):
+    def __init__(self, payload: str) -> None:
+        self.payload = payload
+
+    def generate_text(self, prompt: str, *, schema: dict | None = None) -> str:
+        return self.payload
+
+
+def build_fallback_orchestrator() -> Orchestrator:
     registry = ToolRegistry(PROJECT_ROOT)
     limits = RuntimeLimits(max_steps=3)
     return Orchestrator(
@@ -34,8 +43,23 @@ def build_test_orchestrator() -> Orchestrator:
     )
 
 
+def build_model_orchestrator(payload: str) -> Orchestrator:
+    registry = ToolRegistry(PROJECT_ROOT)
+    limits = RuntimeLimits(max_steps=3, allow_network=True)
+    planner = ModelBackedPlanner(StubModelClient(payload), PromptRegistry(PROJECT_ROOT / 'prompts'))
+    return Orchestrator(
+        planner=planner,
+        tool_selector=ToolSelector(registry),
+        tool_runner=ToolRunner(PROJECT_ROOT, registry, limits),
+        evaluator=Evaluator(),
+        reporter=Reporter(PromptRegistry(PROJECT_ROOT / 'prompts')),
+        logger=SessionLogger(PROJECT_ROOT),
+        runtime_limits=limits,
+    )
+
+
 def test_generic_prompt_without_model_does_not_execute_fake_fallback_step() -> None:
-    orchestrator = build_test_orchestrator()
+    orchestrator = build_fallback_orchestrator()
     result = orchestrator.run('list network status', debug=True)
 
     assert result.plan.planning_mode == 'fallback'
@@ -46,30 +70,60 @@ def test_generic_prompt_without_model_does_not_execute_fake_fallback_step() -> N
     assert 'Model planning did not produce an executable plan.' == result.evaluation.reason
 
 
-def test_explicit_ping_prompt_maps_to_tool_step() -> None:
-    registry = ToolRegistry(PROJECT_ROOT)
-    registry_path = PROJECT_ROOT / 'tool_manifests' / 'ping.json'
-    if not registry_path.exists():
-        registry_path.write_text(json.dumps({
-            'name': 'ping',
-            'tool_type': 1,
-            'description': 'CLI tool manifest for ping.',
-            'command_template': ['ping'],
-            'metadata': {'detected': True, 'path': 'ping'},
-        }, ensure_ascii=False, indent=2), encoding='utf-8')
-
-    orchestrator = build_test_orchestrator()
+def test_model_can_choose_ping_tool_step() -> None:
+    payload = json.dumps({
+        'id': 'plan_test_ping',
+        'goal': 'ping 8.8.8.8',
+        'rationale': 'Model selected the ping tool.',
+        'steps': [
+            {
+                'id': 'step_1',
+                'title': 'Run ping',
+                'objective': 'Ping 8.8.8.8.',
+                'tool_name': 'ping',
+                'tool_input': {'target': '8.8.8.8'},
+                'expected_outcome': 'Ping succeeds.'
+            }
+        ]
+    })
+    orchestrator = build_model_orchestrator(payload)
     result = orchestrator.run('ping 8.8.8.8', debug=True)
-
-    assert result.plan.planning_mode == 'rule_based'
+    assert result.plan.planning_mode == 'model'
     assert result.plan.steps[0].tool_name == 'ping'
-    assert result.plan.steps[0].tool_input == {'target': '8.8.8.8'}
+
+
+def test_model_can_choose_tool_onboarder_script_tool() -> None:
+    candidate = 'python' if shutil.which('python') else Path(sys.executable).name
+    manifest_path = PROJECT_ROOT / 'tool_manifests' / f'{candidate}.json'
+    if manifest_path.exists() and candidate != 'tool_onboarder':
+        manifest_path.unlink()
+    payload = json.dumps({
+        'id': 'plan_test_onboard',
+        'goal': f'add {candidate} as a tool',
+        'rationale': 'Model selected the onboarding script tool.',
+        'steps': [
+            {
+                'id': 'step_1',
+                'title': 'Onboard CLI tool',
+                'objective': f'Register {candidate} as an available CLI tool.',
+                'tool_name': 'tool_onboarder',
+                'tool_input': {'tool_name': candidate},
+                'expected_outcome': 'A manifest is created.'
+            }
+        ]
+    })
+    orchestrator = build_model_orchestrator(payload)
+    result = orchestrator.run(f'add {candidate} as a tool', debug=True)
+    assert result.plan.planning_mode == 'model'
+    assert result.evaluation.success is True
+    assert manifest_path.exists()
 
 
 def test_tool_registry_exposes_three_tool_types() -> None:
     registry = ToolRegistry(PROJECT_ROOT)
     tool_types = {tool.tool_type for tool in registry.list_tools()}
     assert {0, 1, 2}.issubset(tool_types)
+    assert registry.get('tool_onboarder').tool_type == 2
 
 
 def test_fallback_planner_has_no_generic_execution_step() -> None:
@@ -79,7 +133,7 @@ def test_fallback_planner_has_no_generic_execution_step() -> None:
 
 
 def test_missing_command_becomes_tool_failure_instead_of_crash() -> None:
-    orchestrator = build_test_orchestrator()
+    orchestrator = build_fallback_orchestrator()
     bad_step = PlanStep(
         id='bad_step',
         title='Run missing command',
@@ -94,24 +148,16 @@ def test_missing_command_becomes_tool_failure_instead_of_crash() -> None:
     assert 'command execution failed' in record.anomalies[0]
 
 
-def test_add_tool_prompt_creates_manifest_for_detected_cli() -> None:
-    candidate = 'python' if shutil.which('python') else Path(sys.executable).name
-    manifest_path = PROJECT_ROOT / 'tool_manifests' / f'{candidate}.json'
-    if manifest_path.exists():
-        manifest_path.unlink()
-
-    orchestrator = build_test_orchestrator()
-    result = orchestrator.run(f'add tool {candidate}', debug=True)
-
-    assert result.plan.planning_mode == 'rule_based'
-    assert result.evaluation.success is True
-    assert manifest_path.exists()
-    payload = json.loads(manifest_path.read_text(encoding='utf-8'))
-    assert payload['name'] == candidate
-    assert payload['tool_type'] == 1
+def test_logger_accepts_bytes_payloads() -> None:
+    logger = SessionLogger(PROJECT_ROOT)
+    paths = logger.create_session('bytes_logger_test')
+    logger.log_execution(paths, {'stdout': b'raw-bytes', 'nested': {'stderr': b'err'}})
+    content = paths.execution_log.read_text(encoding='utf-8')
+    assert 'raw-bytes' in content
+    assert 'err' in content
 
 
 def test_report_includes_planning_mode() -> None:
-    orchestrator = build_test_orchestrator()
+    orchestrator = build_fallback_orchestrator()
     result = orchestrator.run('list network status', debug=True)
     assert 'Planning mode: fallback' in result.report

@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from loa_v3.model_client import ModelClient, ModelClientError
@@ -13,83 +12,6 @@ PLAN_SCHEMA: dict[str, Any] = {
     'type': 'object',
     'required': ['id', 'goal', 'rationale', 'steps'],
 }
-
-
-def _extract_add_tool_name(user_prompt: str) -> str | None:
-    match = re.match(r'^\s*(?:add|install|register)\s+tool\s+([A-Za-z0-9._+-]+)\s*$', user_prompt or '', flags=re.IGNORECASE)
-    if not match:
-        return None
-    return match.group(1)
-
-
-def _extract_direct_tool_call(user_prompt: str, tools: list[dict]) -> tuple[str, dict[str, Any], str] | None:
-    prompt = (user_prompt or '').strip()
-    tool_names = {str(tool.get('name')) for tool in tools if isinstance(tool, dict)}
-
-    ping_patterns = [
-        r'^\s*ping\s+([^\s]+)\s*$',
-        r'^\s*use\s+ping\s+on\s+([^\s]+)\s*$',
-        r'^\s*use\s+ping\s+for\s+([^\s]+)\s*$',
-    ]
-    if 'ping' in tool_names:
-        for pattern in ping_patterns:
-            match = re.match(pattern, prompt, flags=re.IGNORECASE)
-            if match:
-                target = match.group(1)
-                return 'ping', {'target': target}, f'Ping the target {target}.'
-
-    direct_match = re.match(r'^\s*(?:use\s+)?([A-Za-z0-9._+-]+)\s+([^\s].*)$', prompt, flags=re.IGNORECASE)
-    if not direct_match:
-        return None
-    tool_name = direct_match.group(1)
-    raw_arg = direct_match.group(2).strip()
-    if tool_name not in tool_names or tool_name in {'shell', 'tool_manager'}:
-        return None
-    return tool_name, {'arg_1': raw_arg}, f'Run {tool_name} with argument {raw_arg}.'
-
-
-def _rule_based_plan(user_prompt: str, tools: list[dict]) -> Plan | None:
-    tool_name = _extract_add_tool_name(user_prompt)
-    if tool_name:
-        return Plan(
-            id=new_id('plan'),
-            goal=user_prompt,
-            rationale=f"Rule-based planner detected a tool-onboarding request for '{tool_name}'.",
-            planning_mode='rule_based',
-            planner_note='Handled by local rule-based planner.',
-            steps=[
-                PlanStep(
-                    id='step_1',
-                    title='Register CLI tool',
-                    objective=f"Detect the '{tool_name}' executable and write a manifest entry for it.",
-                    tool_name='tool_manager',
-                    tool_input={'operation': 'register_cli', 'tool_name': tool_name},
-                    expected_outcome=f"A manifest for '{tool_name}' is created under tool_manifests.",
-                )
-            ],
-        )
-
-    direct_tool = _extract_direct_tool_call(user_prompt, tools)
-    if direct_tool is None:
-        return None
-    tool_name, tool_input, objective = direct_tool
-    return Plan(
-        id=new_id('plan'),
-        goal=user_prompt,
-        rationale=f"Rule-based planner mapped the explicit tool request to '{tool_name}'.",
-        planning_mode='rule_based',
-        planner_note='Explicit tool invocation matched from the user prompt.',
-        steps=[
-            PlanStep(
-                id='step_1',
-                title=f'Run {tool_name}',
-                objective=objective,
-                tool_name=tool_name,
-                tool_input=tool_input,
-                expected_outcome=f"The tool '{tool_name}' runs successfully for the requested input.",
-            )
-        ],
-    )
 
 
 class Planner:
@@ -106,9 +28,6 @@ class FallbackPlanner(Planner):
         tools: list[dict],
         note: str = '',
     ) -> Plan:
-        rule_based = _rule_based_plan(user_prompt, tools)
-        if rule_based is not None:
-            return rule_based
         planner_note = note or 'Model planner unavailable; no executable fallback plan was produced.'
         return Plan(
             id=new_id('plan'),
@@ -128,10 +47,6 @@ class ModelBackedPlanner(Planner):
         self.fallback = FallbackPlanner()
 
     def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
-        rule_based = _rule_based_plan(user_prompt, tools)
-        if rule_based is not None:
-            return rule_based
-
         envelope = {
             'user_prompt': user_prompt,
             'runtime_limits': {

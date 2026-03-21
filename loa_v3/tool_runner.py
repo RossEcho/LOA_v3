@@ -1,9 +1,8 @@
 ﻿from __future__ import annotations
 
-import json
 from pathlib import Path
-import shutil
 import subprocess
+import sys
 import time
 
 from loa_v3.tool_registry import ToolRegistry
@@ -14,6 +13,14 @@ class ToolRunnerError(RuntimeError):
     pass
 
 
+def _normalize_text(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode('utf-8', errors='replace')
+    if value is None:
+        return ''
+    return str(value)
+
+
 class ToolRunner:
     def __init__(self, project_root: Path, registry: ToolRegistry, limits: RuntimeLimits) -> None:
         self.project_root = project_root
@@ -22,9 +29,6 @@ class ToolRunner:
 
     def run_step(self, step: PlanStep) -> StepOutcome:
         tool = self.registry.get(step.tool_name)
-        if tool.name == 'tool_manager':
-            return self._run_tool_manager(step)
-
         command = self._build_command(tool, step)
         self._enforce_command_policy(command)
 
@@ -39,13 +43,13 @@ class ToolRunner:
                 check=False,
             )
             timed_out = False
-            stdout = proc.stdout
-            stderr = proc.stderr
+            stdout = _normalize_text(proc.stdout)
+            stderr = _normalize_text(proc.stderr)
             exit_code = proc.returncode
         except subprocess.TimeoutExpired as exc:
             timed_out = True
-            stdout = exc.stdout or ''
-            stderr = (exc.stderr or '') + '\nTimed out after 30s'
+            stdout = _normalize_text(exc.stdout)
+            stderr = _normalize_text(exc.stderr) + '\nTimed out after 30s'
             exit_code = -9
         except OSError as exc:
             raise ToolRunnerError(f'command execution failed: {exc}') from exc
@@ -59,75 +63,20 @@ class ToolRunner:
             timed_out=timed_out,
         )
 
-    def _run_tool_manager(self, step: PlanStep) -> StepOutcome:
-        operation = str(step.tool_input.get('operation') or '').strip().lower()
-        if operation != 'register_cli':
-            raise ToolRunnerError(f'unsupported tool_manager operation: {operation}')
-
-        tool_name = str(step.tool_input.get('tool_name') or '').strip()
-        if not tool_name:
-            raise ToolRunnerError('tool_manager register_cli requires tool_name')
-
-        started = time.perf_counter()
-        resolved = shutil.which(tool_name)
-        if not resolved:
-            raise ToolRunnerError(f"tool '{tool_name}' was not found on PATH")
-
-        version_output = self._capture_first_success([resolved, '--version'], [resolved, '-V'])
-        help_output = self._capture_first_success([resolved, '--help'], [resolved, '-h'])
-
-        manifest_root = self.project_root / 'tool_manifests'
-        manifest_root.mkdir(parents=True, exist_ok=True)
-        manifest_path = manifest_root / f'{tool_name}.json'
-        manifest_payload = {
-            'name': tool_name,
-            'tool_type': 1,
-            'description': f'CLI tool manifest for {tool_name}.',
-            'command_template': [tool_name],
-            'metadata': {
-                'detected': True,
-                'path': resolved,
-                'version_preview': version_output[:200],
-                'help_preview': help_output[:400],
-            },
-        }
-        manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding='utf-8')
-
-        stdout = json.dumps({'ok': True, 'tool_name': tool_name, 'manifest_path': str(manifest_path)}, ensure_ascii=False)
-        return StepOutcome(
-            exit_code=0,
-            stdout=stdout,
-            stderr='',
-            command=['internal:tool_manager', 'register_cli', tool_name],
-            duration_sec=time.perf_counter() - started,
-            timed_out=False,
-        )
-
-    def _capture_first_success(self, *commands: list[str]) -> str:
-        for command in commands:
-            try:
-                proc = subprocess.run(
-                    command,
-                    cwd=str(self.project_root),
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    check=False,
-                )
-            except OSError:
-                continue
-            if proc.returncode == 0:
-                output = (proc.stdout or proc.stderr or '').strip()
-                if output:
-                    return output
-        return ''
-
     def _build_command(self, tool: ToolDefinition, step: PlanStep) -> list[str]:
         if tool.name == 'shell':
             command = step.tool_input.get('command')
             if not isinstance(command, list) or not command or any(not isinstance(item, str) for item in command):
                 raise ToolRunnerError('shell tool requires tool_input.command as a string list')
             return command
+
+        script_path = tool.metadata.get('script_path')
+        if isinstance(script_path, str) and script_path.strip():
+            resolved_script = (self.project_root / script_path).resolve()
+            if not resolved_script.exists():
+                raise ToolRunnerError(f'script tool path not found: {resolved_script}')
+            args = [str(value) for value in step.tool_input.values()]
+            return [sys.executable, str(resolved_script), *args]
 
         if tool.command_template:
             return list(tool.command_template) + [str(value) for value in step.tool_input.values()]
