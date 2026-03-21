@@ -25,9 +25,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 class StubModelClient(ModelClient):
     def __init__(self, payload: str) -> None:
         self.payload = payload
+        self.last_exchange: dict[str, object] | None = None
 
     def generate_text(self, prompt: str, *, schema: dict | None = None) -> str:
+        self.last_exchange = {'prompt_preview': prompt[:2000], 'schema': schema or {}, 'content_preview': self.payload}
         return self.payload
+
+    def get_last_exchange(self) -> dict[str, object] | None:
+        return self.last_exchange
 
 
 def build_fallback_orchestrator() -> Orchestrator:
@@ -91,6 +96,32 @@ def test_model_can_choose_ping_tool_step() -> None:
     result = orchestrator.run('ping 8.8.8.8', debug=True)
     assert result.plan.planning_mode == 'model'
     assert result.plan.steps[0].tool_name == 'ping'
+
+
+def test_planner_debug_snapshot_captures_model_exchange() -> None:
+    payload = json.dumps({
+        'id': 'plan_debug',
+        'goal': 'ping 8.8.8.8',
+        'rationale': 'debug capture test',
+        'steps': [
+            {
+                'id': 'step_1',
+                'title': 'Run ping',
+                'objective': 'Ping the host.',
+                'tool_name': 'ping',
+                'tool_input': {'arg_1': '8.8.8.8'},
+                'expected_outcome': 'Ping succeeds.',
+            }
+        ],
+    })
+    planner = ModelBackedPlanner(StubModelClient(payload), PromptRegistry(PROJECT_ROOT / 'prompts'))
+    registry = ToolRegistry(PROJECT_ROOT)
+    planner.build_plan('ping 8.8.8.8', runtime_limits=RuntimeLimits(max_steps=3, allow_network=True), tools=registry.build_planning_metadata())
+    snapshot = planner.debug_snapshot()
+    assert snapshot['user_prompt'] == 'ping 8.8.8.8'
+    assert 'rendered_prompt' in snapshot
+    assert snapshot['parsed_payload']['id'] == 'plan_debug'
+    assert snapshot['model_exchange']['content_preview'] == payload
 
 
 def test_onboarding_only_goal_trims_invalid_model_execution_steps() -> None:

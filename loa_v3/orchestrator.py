@@ -39,6 +39,9 @@ class Orchestrator:
         self.tool_selector.validate_plan_tools(plan)
         self.logger.log_summary(paths, f'user_prompt: {user_prompt}')
         self.logger.log_decision(paths, {'stage': 'plan_created', 'plan': plan.to_dict()})
+        planner_debug = getattr(self.planner, 'debug_snapshot', None)
+        if callable(planner_debug):
+            self.logger.log_debug(paths, {'stage': 'planner_model_debug', 'payload': planner_debug()})
 
         records: list[ExecutionRecord] = []
         last_signature = None

@@ -27,6 +27,10 @@ class LlamaServerClient(ModelClient):
         self.temperature = temperature
         self.seed = seed
         self.use_schema = use_schema
+        self._last_exchange: dict[str, Any] | None = None
+
+    def get_last_exchange(self) -> dict[str, Any] | None:
+        return self._last_exchange
 
     def generate_text(self, prompt: str, *, schema: dict[str, Any] | None = None) -> str:
         payload: dict[str, Any] = {
@@ -47,6 +51,13 @@ class LlamaServerClient(ModelClient):
                 },
             }
 
+        self._last_exchange = {
+            'endpoint': self.endpoint,
+            'request_payload': payload,
+            'prompt_preview': prompt[:4000],
+            'schema': schema or {},
+        }
+
         request = urllib.request.Request(
             self.endpoint,
             data=json.dumps(payload).encode("utf-8"),
@@ -57,7 +68,12 @@ class LlamaServerClient(ModelClient):
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_sec) as response:
                 body = response.read().decode("utf-8", errors="replace")
+                if self._last_exchange is not None:
+                    self._last_exchange['http_status'] = getattr(response, 'status', None)
+                    self._last_exchange['raw_response'] = body[:12000]
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            if self._last_exchange is not None:
+                self._last_exchange['error'] = str(exc)
             raise ModelClientError(f"llama-server request failed: {exc}") from exc
 
         try:
@@ -72,5 +88,9 @@ class LlamaServerClient(ModelClient):
             content = choice.get("text")
 
         if not isinstance(content, str) or not content.strip():
+            if self._last_exchange is not None:
+                self._last_exchange['error'] = 'llama-server returned empty content'
             raise ModelClientError("llama-server returned empty content")
+        if self._last_exchange is not None:
+            self._last_exchange['content_preview'] = content[:12000]
         return content

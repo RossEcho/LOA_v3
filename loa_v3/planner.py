@@ -171,6 +171,10 @@ class ModelBackedPlanner(Planner):
         self.model_client = model_client
         self.prompt_registry = prompt_registry
         self.fallback = FallbackPlanner()
+        self._last_debug: dict[str, Any] = {}
+
+    def debug_snapshot(self) -> dict[str, Any]:
+        return dict(self._last_debug)
 
     def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
         goal_hints = _derive_goal_hints(user_prompt)
@@ -187,10 +191,21 @@ class ModelBackedPlanner(Planner):
             'tools': tools,
         }
         prompt = self.prompt_registry.render('planner_prompt', input_json=json.dumps(envelope, ensure_ascii=False, indent=2))
+        self._last_debug = {
+            'stage': 'planner_request',
+            'user_prompt': user_prompt,
+            'goal_hints': goal_hints,
+            'envelope': envelope,
+            'rendered_prompt': prompt,
+        }
         try:
             payload = self.model_client.generate_json(prompt, schema=PLAN_SCHEMA)
+            self._last_debug['model_exchange'] = self.model_client.get_last_exchange() or {}
+            self._last_debug['parsed_payload'] = payload
             return self._plan_from_payload(payload, user_prompt, tools, goal_hints)
         except (ModelClientError, KeyError, TypeError, ValueError) as exc:
+            self._last_debug['model_exchange'] = self.model_client.get_last_exchange() or {}
+            self._last_debug['error'] = str(exc)
             return self.fallback.build_plan(user_prompt, runtime_limits=runtime_limits, tools=tools, note=f'model planning failed: {exc}')
 
     def _plan_from_payload(

@@ -56,6 +56,9 @@ class ModelClient(ABC):
     def generate_text(self, prompt: str, *, schema: dict[str, Any] | None = None) -> str:
         raise NotImplementedError
 
+    def get_last_exchange(self) -> dict[str, Any] | None:
+        return None
+
     def generate_json(self, prompt: str, *, schema: dict[str, Any] | None = None) -> dict[str, Any]:
         text = self.generate_text(prompt, schema=schema)
         return extract_json_object(text)
