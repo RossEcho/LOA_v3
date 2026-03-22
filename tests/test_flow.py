@@ -182,6 +182,35 @@ def test_model_can_choose_tool_onboarder_script_tool() -> None:
     assert manifest_path.exists()
 
 
+def test_planner_catalog_is_compact_and_prompt_envelope_omits_raw_tools() -> None:
+    registry = ToolRegistry(PROJECT_ROOT)
+    catalog = _build_planner_catalog(registry.build_planning_metadata())
+    assert 'tool_count' in catalog
+    assert 'tools' not in catalog
+    assert all(len(str(item.get('description', ''))) <= 160 for item in catalog['cli_tools'])
+
+    payload = json.dumps({
+        'id': 'plan_compact',
+        'goal': 'ping 8.8.8.8',
+        'rationale': 'compact prompt test',
+        'steps': [
+            {
+                'id': 'step_1',
+                'title': 'Run ping',
+                'objective': 'Ping the host.',
+                'tool_name': 'ping',
+                'tool_input': {'arg_1': '8.8.8.8'},
+                'expected_outcome': 'Ping succeeds.',
+            }
+        ],
+    })
+    planner = ModelBackedPlanner(StubModelClient(payload), PromptRegistry(PROJECT_ROOT / 'prompts'))
+    planner.build_plan('ping 8.8.8.8', runtime_limits=RuntimeLimits(max_steps=3, allow_network=True), tools=registry.build_planning_metadata())
+    snapshot = planner.debug_snapshot()
+    assert 'tools' not in snapshot['envelope']
+    assert 'catalog' in snapshot['envelope']
+
+
 def test_planner_catalog_includes_onboarding_hints() -> None:
     registry = ToolRegistry(PROJECT_ROOT)
     catalog = _build_planner_catalog(registry.build_planning_metadata())

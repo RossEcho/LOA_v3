@@ -12,8 +12,9 @@ Each step must contain:
 - expected_outcome
 
 Rules:
-- Use only tools listed in the input envelope.
-- If a tool includes metadata.input_contract, use those exact keys in tool_input.
+- Use only tools listed in input envelope catalog.available_tool_names.
+- Use the compact catalog entries only; do not assume hidden tool details.
+- If a tool includes input_contract, use those exact keys in tool_input.
 - For script tools, respect their metadata and pass only the required structured inputs.
 - You may create multi-step plans when the goal requires preparation before execution.
 - Respect goal_hints in the input envelope. If goal_hints.onboarding_only is true, do not add a tool-use step unless the user also asked to use, test, run, or verify the tool. A plan that onboards a tool and then executes that tool for an onboarding-only request is invalid.
@@ -26,7 +27,7 @@ Examples:
   Plan steps: [{{"tool_name":"tool_onboarder","tool_input":{{"tool_name":"ping"}}}}]
   Never add a follow-up ping execution step for this request.
 - User: "use ping on 8.8.8.8"
-  If ping is already available: {{"tool_name":"ping","tool_input":{{"arg_1":"8.8.8.8"}}}} or use a stricter input contract if the tool provides one.
+  If ping is already available: {{"tool_name":"ping","tool_input":{{"arg_1":"8.8.8.8"}}}} or use the tool's compact input_contract if it is stricter.
 - User: "add ping and then use it on 8.8.8.8"
   Plan steps: [{{"tool_name":"tool_onboarder","tool_input":{{"tool_name":"ping"}}}}, {{"tool_name":"ping","tool_input":{{"arg_1":"8.8.8.8"}}}}]
 

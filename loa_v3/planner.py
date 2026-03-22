@@ -70,6 +70,7 @@ def _onboarding_tool_names(tools: list[dict]) -> set[str]:
 def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
     available_names = [str(tool.get('name')) for tool in tools if isinstance(tool, dict) and tool.get('name')]
     catalog = {
+        'tool_count': len(available_names),
         'available_tool_names': available_names,
         'script_tools': [],
         'cli_tools': [],
@@ -83,9 +84,9 @@ def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
         metadata = tool.get('metadata') or {}
         entry = {
             'name': tool.get('name'),
-            'description': tool.get('description'),
+            'description': str(tool.get('description') or '')[:160],
             'input_contract': metadata.get('input_contract', {}),
-            'usage_hint': metadata.get('usage_hint', ''),
+            'usage_hint': str(metadata.get('usage_hint', ''))[:200],
             'capabilities': metadata.get('capabilities', {}),
         }
         tool_type = tool.get('tool_type')
@@ -188,7 +189,6 @@ class ModelBackedPlanner(Planner):
                 'allow_privilege_escalation': runtime_limits.allow_privilege_escalation,
             },
             'catalog': _build_planner_catalog(tools),
-            'tools': tools,
         }
         prompt = self.prompt_registry.render('planner_prompt', input_json=json.dumps(envelope, ensure_ascii=False, indent=2))
         self._last_debug = {
