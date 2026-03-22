@@ -155,6 +155,26 @@ def test_onboarding_only_goal_trims_invalid_model_execution_steps() -> None:
     assert 'Goal boundary enforcement removed execution steps' in plan.planner_note
 
 
+def test_registry_reload_picks_up_new_manifest(tmp_path: Path) -> None:
+    project_root = tmp_path / 'reload_project'
+    project_root.mkdir()
+    (project_root / 'tool_manifests').mkdir()
+    registry = ToolRegistry(project_root)
+    assert 'tempcli' not in {tool.name for tool in registry.list_tools()}
+
+    manifest_path = project_root / 'tool_manifests' / 'tempcli.json'
+    manifest_path.write_text(json.dumps({
+        'name': 'tempcli',
+        'tool_type': 1,
+        'description': 'temp cli',
+        'command_template': ['tempcli'],
+        'metadata': {'input_contract': {'arg_1': 'string'}},
+    }, ensure_ascii=False), encoding='utf-8')
+
+    registry.reload()
+    assert registry.get('tempcli').name == 'tempcli'
+
+
 def test_model_can_choose_tool_onboarder_script_tool() -> None:
     candidate = 'python' if shutil.which('python') else Path(sys.executable).name
     manifest_path = PROJECT_ROOT / 'tool_manifests' / f'{candidate}.json'
@@ -252,6 +272,7 @@ def test_build_cli_metadata_infers_structured_help_details() -> None:
     assert 'count' not in metadata['input_contract']
     assert metadata['execution']['long_running_by_default'] is True
     assert metadata['execution']['safe_default_flags'] == ['-c', '4']
+    assert 'default_timeout_sec' not in metadata['execution']
     assert metadata['optional_args'][0]['flags'][0] == '-c'
 
 
@@ -315,7 +336,6 @@ def test_tool_runner_uses_safe_default_flags_from_manifest(tmp_path: Path) -> No
             'execution': {
                 'long_running_by_default': True,
                 'safe_default_flags': ['--count', '4'],
-                'default_timeout_sec': 30,
             },
         },
     }, ensure_ascii=False), encoding='utf-8')

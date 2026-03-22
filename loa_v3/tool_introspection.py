@@ -203,6 +203,5 @@ def build_cli_metadata(tool_name: str, resolved_path: str, help_output: str, ver
         'execution': {
             'long_running_by_default': long_running_by_default,
             'safe_default_flags': safe_default_flags,
-            'default_timeout_sec': 30,
         },
     }

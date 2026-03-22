@@ -59,6 +59,7 @@ class Orchestrator:
             record = self._execute_step(step)
             records.append(record)
             self.logger.log_execution(paths, record.to_dict())
+            self._refresh_registry_if_needed(step, record)
             if debug:
                 self.logger.log_debug(paths, {'step': step.to_dict(), 'record': record.to_dict()})
             if record.status == 'failed' and self.runtime_limits.stop_on_step_failure:
@@ -76,6 +77,17 @@ class Orchestrator:
             report=report,
             session_dir=str(paths.root),
         )
+
+    def _refresh_registry_if_needed(self, step: PlanStep, record: ExecutionRecord) -> None:
+        if record.status != 'success':
+            return
+        try:
+            tool = self.tool_selector.registry.get(step.tool_name)
+        except KeyError:
+            return
+        capabilities = (tool.metadata or {}).get('capabilities', {})
+        if capabilities.get('writes_tool_manifests'):
+            self.tool_selector.registry.reload()
 
     def _execute_step(self, step: PlanStep) -> ExecutionRecord:
         step.status = 'running'

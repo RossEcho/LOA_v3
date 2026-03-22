@@ -30,7 +30,6 @@ def _enrich_tool_metadata(tool: ToolDefinition) -> ToolDefinition:
         metadata['execution'] = {
             'long_running_by_default': False,
             'safe_default_flags': [],
-            'default_timeout_sec': 30,
         }
     if tool.tool_type == 1 and 'usage_hint' not in metadata:
         metadata['usage_hint'] = GENERIC_CLI_USAGE_HINT
@@ -50,6 +49,11 @@ class ToolRegistry:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
         self._tools: dict[str, ToolDefinition] = {}
+        self._register_builtin_tools()
+        self._load_script_manifests()
+
+    def reload(self) -> None:
+        self._tools = {}
         self._register_builtin_tools()
         self._load_script_manifests()
 
@@ -78,7 +82,6 @@ class ToolRegistry:
                 'execution': {
                     'long_running_by_default': False,
                     'safe_default_flags': [],
-                    'default_timeout_sec': 30,
                 },
                 'usage_hint': GENERIC_CLI_USAGE_HINT,
             },
