@@ -15,6 +15,8 @@ Rules:
 - Use only tools listed in input envelope catalog.available_tool_names.
 - Use the compact catalog entries only; do not assume hidden tool details.
 - If a tool includes input_contract, use those exact keys in tool_input.
+- Never fill tool_input with placeholder values like `string`, `value`, or `example`; include only values the user actually requested or values required by safe execution defaults.
+- Do not include optional flags or optional inputs unless the user asked for them or the manifest marks them as safe defaults for execution.
 - For script tools, respect their metadata and pass only the required structured inputs.
 - You may create multi-step plans when the goal requires preparation before execution.
 - Respect goal_hints in the input envelope. If goal_hints.onboarding_only is true, do not add a tool-use step unless the user also asked to use, test, run, or verify the tool. A plan that onboards a tool and then executes that tool for an onboarding-only request is invalid.

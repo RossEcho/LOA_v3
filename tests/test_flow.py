@@ -232,6 +232,14 @@ def test_goal_hints_distinguish_onboard_only_from_use() -> None:
     assert combined['requested_actions'] == ['onboard_tool', 'use_tool']
 
 
+def test_infer_input_contract_ignores_option_clusters_in_usage() -> None:
+    help_output = '''Usage: ping [-aAbBdDfhLnOqrRUvV] [-c count] [-I interface] <destination>
+'''
+    metadata = build_cli_metadata('ping', '/usr/bin/ping', help_output, '', {'help_command': ['ping', '-h']})
+    assert metadata['input_contract'] == {'destination': 'string'}
+    assert metadata['required_args'] == ['destination']
+
+
 def test_build_cli_metadata_infers_structured_help_details() -> None:
     help_output = '''Usage: ping [options] <destination>
   -c <count>         stop after sending count packets
@@ -241,6 +249,7 @@ def test_build_cli_metadata_infers_structured_help_details() -> None:
     metadata = build_cli_metadata('ping', '/usr/bin/ping', help_output, 'ping version', {'help_command': ['ping', '-h']})
     assert metadata['input_contract'] == {'destination': 'string'}
     assert metadata['required_args'] == ['destination']
+    assert 'count' not in metadata['input_contract']
     assert metadata['execution']['long_running_by_default'] is True
     assert metadata['execution']['safe_default_flags'] == ['-c', '4']
     assert metadata['optional_args'][0]['flags'][0] == '-c'

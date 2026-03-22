@@ -57,21 +57,24 @@ def infer_input_contract(tool_name: str, help_output: str) -> dict[str, str]:
     if not usage_line:
         return {'arg_1': 'string'}
 
-    tokens = re.findall(r'<[^>]+>|\b[a-zA-Z][a-zA-Z0-9_.:-]*\b', usage_line)
     command_tokens = {tool_name.casefold(), Path(tool_name).name.casefold()}
     positionals: list[str] = []
-    for token in tokens:
-        if token.startswith('<') and token.endswith('>'):
-            positionals.append(token)
-            continue
-        lowered = token.casefold()
-        if lowered in command_tokens or lowered in {'usage'}:
-            continue
-        if token.startswith('-'):
-            continue
-        if lowered in {'options', 'option'}:
-            continue
+
+    explicit_placeholders = re.findall(r'<[^>]+>', usage_line)
+    for token in explicit_placeholders:
         positionals.append(token)
+
+    if not positionals:
+        cleaned_usage = re.sub(r'\[[^\]]*\]', ' ', usage_line)
+        tokens = re.findall(r'[A-Z][A-Z0-9_-]*|[a-zA-Z][a-zA-Z0-9_.:-]*', cleaned_usage)
+        for token in tokens:
+            lowered = token.casefold()
+            if lowered in command_tokens or lowered in {'usage', 'options', 'option'}:
+                continue
+            if token.startswith('-'):
+                continue
+            if token.isupper():
+                positionals.append(token)
 
     if not positionals:
         return {'arg_1': 'string'}
@@ -83,7 +86,6 @@ def infer_input_contract(tool_name: str, help_output: str) -> dict[str, str]:
             name = f'{name}_{index}'
         contract[name] = 'string'
     return contract
-
 
 def extract_option_specs(help_output: str) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = []
