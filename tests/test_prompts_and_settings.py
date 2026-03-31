@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from loa_v3.app import _logs_summary, _settings_summary
+from loa_v3.app import _logs_summary, _progress_message, _settings_summary
 from loa_v3.config_loader import SettingsLoader
 from loa_v3.prompt_registry import PromptRegistry
 
@@ -42,3 +42,8 @@ def test_logs_summary_exposes_cleanup_actions(tmp_path: Path) -> None:
     assert any('Clear one log session' in item for item in summary)
     assert any('Clear all log sessions' in item for item in summary)
     assert summary[-1].endswith('run_b')
+
+
+def test_progress_message_formats_runtime_updates() -> None:
+    assert _progress_message('planning_retry', {'attempt': 2}).startswith('Retrying planning')
+    assert 'use_ping' in _progress_message('step_started', {'step_id': 'use_ping', 'tool_name': 'ping'})

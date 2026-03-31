@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import os
 import shutil
 from typing import Any
 
@@ -19,6 +20,7 @@ class ToolState:
     path_matches: bool
     version_recorded: bool
     version_matches: bool | None
+    metadata_complete: bool
     ready: bool
     needs_onboarding: bool
     stale: bool
@@ -52,14 +54,44 @@ def _version_preview_for(tool: ToolDefinition, resolved_path: str, metadata: dic
     return True, current_preview == recorded_preview
 
 
+def _metadata_quality_reasons(metadata: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if not metadata.get('input_contract'):
+        reasons.append('manifest lacks input_contract')
+    if not metadata.get('argument_order'):
+        reasons.append('manifest lacks argument_order')
+    if not metadata.get('required_args'):
+        reasons.append('manifest lacks required_args')
+    execution = metadata.get('execution')
+    if not isinstance(execution, dict):
+        reasons.append('manifest lacks execution metadata')
+    else:
+        if 'long_running_by_default' not in execution:
+            reasons.append('manifest lacks long_running_by_default metadata')
+        if 'safe_default_flags' not in execution:
+            reasons.append('manifest lacks safe_default_flags metadata')
+    if not metadata.get('usage_hint'):
+        reasons.append('manifest lacks usage_hint')
+    if not metadata.get('help_probe') and not metadata.get('help_preview'):
+        reasons.append('manifest lacks help-derived probe metadata')
+    return reasons
+
+
+def _same_path(left: str, right: str) -> bool:
+    if not left or not right:
+        return left == right
+    return os.path.normcase(left) == os.path.normcase(right)
+
+
 def evaluate_tool_state(tool: ToolDefinition) -> ToolState:
     metadata = dict(tool.metadata or {})
     manifest_present = bool(tool.manifest_path)
     resolved_path = shutil.which(tool.name) or ''
     recorded_path = str(metadata.get('path') or '')
-    path_matches = not recorded_path or recorded_path == resolved_path
+    path_matches = not recorded_path or _same_path(recorded_path, resolved_path)
     detected = bool(resolved_path)
     version_recorded, version_matches = _version_preview_for(tool, resolved_path, metadata) if detected else (bool(metadata.get('version_preview')), None)
+    metadata_quality_reasons = _metadata_quality_reasons(metadata) if manifest_present and tool.tool_type == 1 else []
 
     reasons: list[str] = []
     if tool.tool_type != 1:
@@ -72,9 +104,18 @@ def evaluate_tool_state(tool: ToolDefinition) -> ToolState:
         reasons.append('resolved path differs from recorded manifest path')
     if version_recorded and version_matches is False:
         reasons.append('current version preview differs from recorded manifest version preview')
+    reasons.extend(metadata_quality_reasons)
 
-    ready = bool(tool.tool_type == 1 and detected and manifest_present and path_matches and version_matches is not False)
-    stale = bool(manifest_present and (not path_matches or version_matches is False))
+    metadata_complete = not metadata_quality_reasons
+    ready = bool(
+        tool.tool_type == 1
+        and detected
+        and manifest_present
+        and path_matches
+        and version_matches is not False
+        and metadata_complete
+    )
+    stale = bool(manifest_present and (not path_matches or version_matches is False or not metadata_complete))
     needs_onboarding = bool(tool.tool_type == 1 and (not ready))
 
     return ToolState(
@@ -87,6 +128,7 @@ def evaluate_tool_state(tool: ToolDefinition) -> ToolState:
         path_matches=path_matches,
         version_recorded=version_recorded,
         version_matches=version_matches,
+        metadata_complete=metadata_complete,
         ready=ready,
         needs_onboarding=needs_onboarding,
         stale=stale,

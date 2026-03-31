@@ -14,6 +14,9 @@ Each step must contain:
 Rules:
 - Use only tools listed in input envelope catalog.available_tool_names.
 - Use the compact catalog entries only; do not assume hidden tool details.
+- Use exact tool names from catalog.available_tool_names. Do not invent aliases or renamed variants.
+- Prefer descriptive stable step ids such as `onboard_ping`, `use_ping`, or `inspect_network`; avoid generic ids like `step_1` when a clearer action name is possible.
+- Prefer descriptive titles such as `Onboard ping tool` or `Run ping check`; avoid generic titles like `Step 1` when a clearer title is possible.
 - If a tool includes input_contract, use those exact keys in tool_input.
 - Never fill tool_input with placeholder values like `string`, `value`, or `example`; include only values the user actually requested or values required by safe execution defaults.
 - Do not include optional flags or optional inputs unless the user asked for them or the manifest marks them as safe defaults for execution.
@@ -22,20 +25,21 @@ Rules:
 - Respect goal_hints in the input envelope. If goal_hints.onboarding_only is true, do not add a tool-use step unless the user also asked to use, test, run, or verify the tool. A plan that onboards a tool and then executes that tool for an onboarding-only request is invalid.
 - If the goal needs a command that is not yet available but a script tool can onboard CLI tools, first plan the onboarding step, then plan the actual tool use step only when the user explicitly requested usage.
 - If onboarding a set of tools in one request, prefer one onboarding step with a multi-tool payload over several separate onboarding steps when the script tool supports it.
-- If a CLI tool is already detected, has a manifest, and is marked up_to_date in the catalog, use it directly and do not add a redundant onboarding step.
+- If a CLI tool is already detected, has a manifest, and is marked ready=true in the catalog, use it directly and do not add a redundant onboarding step.
+- If a CLI tool is marked stale=true or needs_onboarding=true, prefer refreshing or onboarding it before use.
 - Do not assume only one step is enough when the user goal requires setup first.
 - If you cannot produce an executable plan, return a JSON object with an empty steps array.
 
 Examples:
 - User: "add the tool ping"
-  Plan steps: [{{"tool_name":"tool_onboarder","tool_input":{{"tool_name":"ping"}}}}]
+  Plan steps: [{{"id":"onboard_ping","title":"Onboard ping tool","tool_name":"tool_onboarder","tool_input":{{"tool_names":["ping"]}}}}]
   Never add a follow-up ping execution step for this request.
 - User: "use ping on 8.8.8.8"
-  If ping is already available: {{"tool_name":"ping","tool_input":{{"arg_1":"8.8.8.8"}}}} or use the tool's compact input_contract if it is stricter.
+  If ping is already available: {{"id":"use_ping","title":"Run ping check","tool_name":"ping","tool_input":{{"arg_1":"8.8.8.8"}}}} or use the tool's compact input_contract if it is stricter.
 - User: "add ping and then use it on 8.8.8.8"
-  Plan steps: [{{"tool_name":"tool_onboarder","tool_input":{{"tool_names":["ping"]}}}}, {{"tool_name":"ping","tool_input":{{"arg_1":"8.8.8.8"}}}}]
+  Plan steps: [{{"id":"onboard_ping","title":"Onboard ping tool","tool_name":"tool_onboarder","tool_input":{{"tool_names":["ping"]}}}}, {{"id":"use_ping","title":"Run ping check","tool_name":"ping","tool_input":{{"arg_1":"8.8.8.8"}}}}]
 - User: "add ping and nmap"
-  Plan steps: [{{"tool_name":"tool_onboarder","tool_input":{{"tool_names":["ping","nmap"]}}}}]
+  Plan steps: [{{"id":"onboard_tools","title":"Onboard requested tools","tool_name":"tool_onboarder","tool_input":{{"tool_names":["ping","nmap"]}}}}]
 
 Use this input envelope:
 {input_json}

@@ -9,7 +9,7 @@ from loa_v3.evaluator import Evaluator
 from loa_v3.logger import SessionLogger
 from loa_v3.model_client import ModelClient
 from loa_v3.orchestrator import Orchestrator
-from loa_v3.planner import FallbackPlanner, ModelBackedPlanner, _build_planner_catalog, _derive_goal_hints
+from loa_v3.planner import FallbackPlanner, ModelBackedPlanner, Planner, _build_planner_catalog, _derive_goal_hints
 from loa_v3.prompt_registry import PromptRegistry
 from loa_v3.reporter import Reporter
 from loa_v3.tool_introspection import build_cli_metadata
@@ -17,7 +17,7 @@ from loa_v3.tool_registry import ToolRegistry
 from loa_v3.tool_state import evaluate_tool_state
 from loa_v3.tool_runner import ToolRunner
 from loa_v3.tool_selector import ToolSelector
-from loa_v3.types import PlanStep, RuntimeLimits
+from loa_v3.types import Plan, PlanStep, RuntimeLimits
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -36,32 +36,80 @@ class StubModelClient(ModelClient):
         return self.last_exchange
 
 
-def build_fallback_orchestrator() -> Orchestrator:
-    registry = ToolRegistry(PROJECT_ROOT)
+def create_test_project(tmp_path: Path) -> Path:
+    project_root = tmp_path / 'project'
+    project_root.mkdir()
+    manifest_root = project_root / 'tool_manifests'
+    manifest_root.mkdir()
+    for static_name in ('tool_onboarder.json', 'echo_script.json'):
+        source = PROJECT_ROOT / 'tool_manifests' / static_name
+        if source.exists():
+            (manifest_root / static_name).write_text(source.read_text(encoding='utf-8'), encoding='utf-8')
+    return project_root
+
+
+def write_cli_manifest(project_root: Path, name: str, *, metadata: dict | None = None, command_template: list[str] | None = None) -> Path:
+    resolved = shutil.which(name) or name
+    payload = {
+        'name': name,
+        'tool_type': 1,
+        'description': f'CLI tool manifest for {name}.',
+        'command_template': command_template or [resolved],
+        'metadata': {
+            'detected': True,
+            'path': resolved,
+            'version_preview': '',
+            'help_preview': 'Usage: ping <destination>' if name == 'ping' else 'usage: tool <arg>',
+            'help_probe': {'help_command': [resolved, '-h']},
+            'input_contract': {'arg_1': 'string'},
+            'argument_order': ['arg_1'],
+            'required_args': ['arg_1'],
+            'optional_args': [],
+            'platform_variants': [sys.platform],
+            'usage_hint': 'CLI tool requiring positional inputs: arg_1.',
+            'execution': {
+                'long_running_by_default': name == 'ping',
+                'safe_default_flags': ['-c', '4'] if name == 'ping' else [],
+            },
+        },
+    }
+    if metadata:
+        payload['metadata'].update(metadata)
+    manifest_path = project_root / 'tool_manifests' / f'{name}.json'
+    manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    return manifest_path
+
+
+def build_fallback_orchestrator(project_root: Path | None = None, *, progress_callback=None) -> Orchestrator:
+    root = project_root or PROJECT_ROOT
+    registry = ToolRegistry(root)
     limits = RuntimeLimits(max_steps=3)
     return Orchestrator(
         planner=FallbackPlanner(),
         tool_selector=ToolSelector(registry),
-        tool_runner=ToolRunner(PROJECT_ROOT, registry, limits),
+        tool_runner=ToolRunner(root, registry, limits),
         evaluator=Evaluator(),
         reporter=Reporter(PromptRegistry(PROJECT_ROOT / 'prompts')),
-        logger=SessionLogger(PROJECT_ROOT),
+        logger=SessionLogger(root),
         runtime_limits=limits,
+        progress_callback=progress_callback,
     )
 
 
-def build_model_orchestrator(payload: str) -> Orchestrator:
-    registry = ToolRegistry(PROJECT_ROOT)
+def build_model_orchestrator(payload: str, project_root: Path | None = None, *, progress_callback=None) -> Orchestrator:
+    root = project_root or PROJECT_ROOT
+    registry = ToolRegistry(root)
     limits = RuntimeLimits(max_steps=3, allow_network=True)
     planner = ModelBackedPlanner(StubModelClient(payload), PromptRegistry(PROJECT_ROOT / 'prompts'))
     return Orchestrator(
         planner=planner,
         tool_selector=ToolSelector(registry),
-        tool_runner=ToolRunner(PROJECT_ROOT, registry, limits),
+        tool_runner=ToolRunner(root, registry, limits),
         evaluator=Evaluator(),
         reporter=Reporter(PromptRegistry(PROJECT_ROOT / 'prompts')),
-        logger=SessionLogger(PROJECT_ROOT),
+        logger=SessionLogger(root),
         runtime_limits=limits,
+        progress_callback=progress_callback,
     )
 
 
@@ -77,7 +125,9 @@ def test_generic_prompt_without_model_does_not_execute_fake_fallback_step() -> N
     assert 'Model planning did not produce an executable plan.' == result.evaluation.reason
 
 
-def test_model_can_choose_ping_tool_step() -> None:
+def test_model_can_choose_ping_tool_step(tmp_path: Path) -> None:
+    project_root = create_test_project(tmp_path)
+    write_cli_manifest(project_root, 'ping')
     payload = json.dumps({
         'id': 'plan_test_ping',
         'goal': 'ping 8.8.8.8',
@@ -93,7 +143,7 @@ def test_model_can_choose_ping_tool_step() -> None:
             }
         ]
     })
-    orchestrator = build_model_orchestrator(payload)
+    orchestrator = build_model_orchestrator(payload, project_root)
     result = orchestrator.run('ping 8.8.8.8', debug=True)
     assert result.plan.planning_mode == 'model'
     assert result.plan.steps[0].tool_name == 'ping'
@@ -125,7 +175,9 @@ def test_planner_debug_snapshot_captures_model_exchange() -> None:
     assert snapshot['model_exchange']['content_preview'] == payload
 
 
-def test_redundant_onboarding_is_removed_when_cli_tool_is_ready() -> None:
+def test_redundant_onboarding_is_removed_when_cli_tool_is_ready(tmp_path: Path) -> None:
+    project_root = create_test_project(tmp_path)
+    write_cli_manifest(project_root, 'ping')
     payload = json.dumps({
         'id': 'plan_redundant_onboard',
         'goal': 'check the ip 8.8.8.8',
@@ -150,7 +202,7 @@ def test_redundant_onboarding_is_removed_when_cli_tool_is_ready() -> None:
         ],
     })
     planner = ModelBackedPlanner(StubModelClient(payload), PromptRegistry(PROJECT_ROOT / 'prompts'))
-    registry = ToolRegistry(PROJECT_ROOT)
+    registry = ToolRegistry(project_root)
     plan = planner.build_plan('check the ip 8.8.8.8', runtime_limits=RuntimeLimits(max_steps=3, allow_network=True), tools=registry.build_planning_metadata())
     assert [step.tool_name for step in plan.steps] == ['ping']
     assert 'already onboarded and up to date' in plan.planner_note
@@ -356,14 +408,17 @@ def test_tool_registry_exposes_three_tool_types() -> None:
     assert registry.get('tool_onboarder').tool_type == 2
 
 
-def test_tool_registry_enriches_generic_cli_and_onboarder_metadata() -> None:
-    registry = ToolRegistry(PROJECT_ROOT)
+def test_tool_registry_enriches_generic_cli_and_onboarder_metadata(tmp_path: Path) -> None:
+    project_root = create_test_project(tmp_path)
+    write_cli_manifest(project_root, 'ping')
+    registry = ToolRegistry(project_root)
     ping = registry.get('ping')
     assert ping.metadata['input_contract']
     assert 'execution' in ping.metadata
     assert ping.metadata['required_args'] == list(ping.metadata['input_contract'].keys())
-    assert registry.get('tool_onboarder').metadata['input_contract'] == {'tool_names': 'string[]'}
-    assert registry.get('tool_onboarder').metadata['capabilities']['adds_cli_tools'] is True
+    script_registry = ToolRegistry(PROJECT_ROOT)
+    assert script_registry.get('tool_onboarder').metadata['input_contract'] == {'tool_names': 'string[]'}
+    assert script_registry.get('tool_onboarder').metadata['capabilities']['adds_cli_tools'] is True
 
 
 def test_tool_runner_uses_runtime_default_timeout_when_manifest_omits_it(tmp_path: Path) -> None:
@@ -463,8 +518,10 @@ def test_report_includes_planning_mode() -> None:
     assert 'Planning mode: fallback' in result.report
 
 
-def test_tool_state_marks_ready_cli_with_manifest_and_matching_path() -> None:
-    registry = ToolRegistry(PROJECT_ROOT)
+def test_tool_state_marks_ready_cli_with_manifest_and_matching_path(tmp_path: Path) -> None:
+    project_root = create_test_project(tmp_path)
+    write_cli_manifest(project_root, 'ping')
+    registry = ToolRegistry(project_root)
     state = evaluate_tool_state(registry.get('ping'))
     assert state.detected is True
     assert state.manifest_present is True
@@ -472,10 +529,136 @@ def test_tool_state_marks_ready_cli_with_manifest_and_matching_path() -> None:
     assert state.needs_onboarding is False
 
 
-def test_planner_catalog_exposes_tool_state_flags() -> None:
-    registry = ToolRegistry(PROJECT_ROOT)
+def test_planner_catalog_exposes_tool_state_flags(tmp_path: Path) -> None:
+    project_root = create_test_project(tmp_path)
+    write_cli_manifest(project_root, 'ping')
+    registry = ToolRegistry(project_root)
     catalog = _build_planner_catalog(registry.build_planning_metadata())
     ping_entry = next(item for item in catalog['cli_tools'] if item['name'] == 'ping')
     assert 'ready' in ping_entry
     assert 'needs_onboarding' in ping_entry
     assert ping_entry['ready'] is True
+
+
+class RetrySuccessPlanner(Planner):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def debug_snapshot(self) -> dict[str, object]:
+        return {'calls': self.calls}
+
+    def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
+        self.calls += 1
+        if self.calls == 1:
+            return FallbackPlanner().build_plan(user_prompt, runtime_limits=runtime_limits, tools=tools, note='model returned no executable steps')
+        return Plan(
+            id='plan_retry_success',
+            goal=user_prompt,
+            rationale='retry recovered',
+            planning_mode='model',
+            planner_note='Plan generated by llama-server model backend.',
+            steps=[
+                PlanStep(
+                    id='step_retry',
+                    title='Retry step',
+                    objective='Run a safe shell command.',
+                    tool_name='shell',
+                    tool_input={'command': [sys.executable, '-c', 'print("ok")']},
+                    expected_outcome='The command succeeds.',
+                )
+            ],
+        )
+
+
+class RetryFailurePlanner(Planner):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def debug_snapshot(self) -> dict[str, object]:
+        return {'calls': self.calls}
+
+    def build_plan(self, user_prompt: str, *, runtime_limits: RuntimeLimits, tools: list[dict]) -> Plan:
+        self.calls += 1
+        return FallbackPlanner().build_plan(user_prompt, runtime_limits=runtime_limits, tools=tools, note='model returned no executable steps')
+
+
+def test_orchestrator_retries_non_executable_plan_once() -> None:
+    planner = RetrySuccessPlanner()
+    registry = ToolRegistry(PROJECT_ROOT)
+    limits = RuntimeLimits(max_steps=2)
+    orchestrator = Orchestrator(
+        planner=planner,
+        tool_selector=ToolSelector(registry),
+        tool_runner=ToolRunner(PROJECT_ROOT, registry, limits),
+        evaluator=Evaluator(),
+        reporter=Reporter(PromptRegistry(PROJECT_ROOT / 'prompts')),
+        logger=SessionLogger(PROJECT_ROOT),
+        runtime_limits=limits,
+    )
+    result = orchestrator.run('list network status', debug=True)
+    assert planner.calls == 2
+    assert result.evaluation.success is True
+    assert 'Planning retry recovered after initial failure' in result.plan.planner_note
+
+
+def test_fallback_reason_mentions_retry_when_retry_also_fails() -> None:
+    planner = RetryFailurePlanner()
+    registry = ToolRegistry(PROJECT_ROOT)
+    limits = RuntimeLimits(max_steps=2)
+    orchestrator = Orchestrator(
+        planner=planner,
+        tool_selector=ToolSelector(registry),
+        tool_runner=ToolRunner(PROJECT_ROOT, registry, limits),
+        evaluator=Evaluator(),
+        reporter=Reporter(PromptRegistry(PROJECT_ROOT / 'prompts')),
+        logger=SessionLogger(PROJECT_ROOT),
+        runtime_limits=limits,
+    )
+    result = orchestrator.run('list network status', debug=True)
+    assert planner.calls == 2
+    assert result.evaluation.reason == 'Model planning did not produce an executable plan after retry.'
+
+
+def test_progress_callback_receives_runtime_updates() -> None:
+    planner = RetrySuccessPlanner()
+    registry = ToolRegistry(PROJECT_ROOT)
+    limits = RuntimeLimits(max_steps=2)
+    stages: list[str] = []
+
+    def capture(stage: str, payload: dict[str, object]) -> None:
+        stages.append(stage)
+
+    orchestrator = Orchestrator(
+        planner=planner,
+        tool_selector=ToolSelector(registry),
+        tool_runner=ToolRunner(PROJECT_ROOT, registry, limits),
+        evaluator=Evaluator(),
+        reporter=Reporter(PromptRegistry(PROJECT_ROOT / 'prompts')),
+        logger=SessionLogger(PROJECT_ROOT),
+        runtime_limits=limits,
+        progress_callback=capture,
+    )
+    orchestrator.run('list network status', debug=True)
+    assert 'planning_started' in stages
+    assert 'planning_retry' in stages
+    assert 'step_started' in stages
+    assert 'step_completed' in stages
+    assert 'evaluating' in stages
+    assert 'completed' in stages
+
+
+def test_incomplete_cli_manifest_is_marked_stale(tmp_path: Path) -> None:
+    project_root = create_test_project(tmp_path)
+    write_cli_manifest(project_root, 'ping', metadata={
+        'help_probe': {},
+        'help_preview': '',
+        'execution': {},
+        'argument_order': [],
+        'required_args': [],
+        'usage_hint': '',
+    })
+    registry = ToolRegistry(project_root)
+    state = evaluate_tool_state(registry.get('ping'))
+    assert state.metadata_complete is False
+    assert state.stale is True
+    assert state.needs_onboarding is True

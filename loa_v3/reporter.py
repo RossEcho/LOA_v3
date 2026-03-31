@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 
@@ -46,6 +46,8 @@ class Reporter:
                 lines.append(f'- {record.step_id}: no outcome recorded')
                 continue
             lines.append(f"- {record.step_id} [{record.status}] command={' '.join(outcome.command)} exit={outcome.exit_code}")
+            if outcome.timed_out and outcome.stdout.strip():
+                lines.append('  note: command produced output before timeout; consider replanning with safer defaults or a bounded invocation.')
             if record.anomalies:
                 lines.append(f"  anomalies: {', '.join(record.anomalies)}")
         return '\n'.join(lines)

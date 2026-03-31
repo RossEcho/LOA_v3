@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from loa_v3.types import Evaluation, ExecutionRecord, Plan, RuntimeLimits
 
@@ -7,11 +7,14 @@ class Evaluator:
     def evaluate(self, plan: Plan, records: list[ExecutionRecord], limits: RuntimeLimits) -> Evaluation:
         if not records:
             if plan.planning_mode == 'fallback':
+                reason = 'Model planning did not produce an executable plan.'
+                if 'Retry attempted after initial planning failure' in plan.planner_note:
+                    reason = 'Model planning did not produce an executable plan after retry.'
                 return Evaluation(
                     complete=False,
                     success=False,
                     needs_replan=True,
-                    reason='Model planning did not produce an executable plan.',
+                    reason=reason,
                     anomalies=['planner_fallback', plan.planner_note or 'model_planning_unavailable'],
                 )
             return Evaluation(
@@ -24,12 +27,21 @@ class Evaluator:
 
         failed = [record for record in records if record.status == 'failed']
         if failed:
+            primary = failed[0]
+            if primary.outcome and primary.outcome.timed_out and primary.outcome.stdout.strip():
+                return Evaluation(
+                    complete=False,
+                    success=False,
+                    needs_replan=True,
+                    reason=f'Step timed out after producing output: {primary.step_id}',
+                    anomalies=[f'{primary.step_id}:step_timed_out_with_output'],
+                )
             return Evaluation(
                 complete=limits.stop_on_step_failure,
                 success=False,
                 needs_replan=not limits.stop_on_step_failure,
-                reason=f'Step failure detected: {failed[0].step_id}',
-                anomalies=[f'{failed[0].step_id}:step_failed'],
+                reason=f'Step failure detected: {primary.step_id}',
+                anomalies=[f'{primary.step_id}:step_failed'],
             )
 
         if len(records) < len(plan.steps):

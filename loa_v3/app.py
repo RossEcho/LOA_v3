@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Any
 
 from loa_v3.config_loader import SettingsLoader
 from loa_v3.evaluator import Evaluator
@@ -21,7 +22,34 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNS_ROOT = PROJECT_ROOT / 'runs'
 
 
-def build_app(*, debug: bool = False) -> Orchestrator:
+def _progress_message(stage: str, payload: dict[str, Any]) -> str:
+    if stage == 'planning_started':
+        return f"Planning attempt {payload.get('attempt', 1)}..."
+    if stage == 'planning_retry':
+        return f"Retrying planning (attempt {payload.get('attempt', '?')}) after a non-executable result..."
+    if stage == 'plan_ready':
+        return f"Plan ready: {payload.get('step_count', 0)} step(s), mode={payload.get('planning_mode', 'unknown')}"
+    if stage == 'step_started':
+        return f"Running {payload.get('step_id', 'step')} with {payload.get('tool_name', 'tool')}..."
+    if stage == 'step_completed':
+        return (
+            f"Finished {payload.get('step_id', 'step')}: {payload.get('status', 'unknown')} "
+            f"exit={payload.get('exit_code', '?')}"
+        )
+    if stage == 'evaluating':
+        return 'Evaluating results...'
+    if stage == 'completed':
+        return f"Run complete: {'success' if payload.get('success') else 'failure'}"
+    if stage == 'stopped':
+        return payload.get('message', 'Run stopped.')
+    return payload.get('message', stage.replace('_', ' ').title())
+
+
+def _terminal_progress(stage: str, payload: dict[str, Any]) -> None:
+    print(f"[{stage}] {_progress_message(stage, payload)}", flush=True)
+
+
+def build_app(*, debug: bool = False, progress_callback=None) -> Orchestrator:
     settings_loader = SettingsLoader(PROJECT_ROOT)
     settings = settings_loader.load()
     runtime_limits = settings_loader.build_runtime_limits(settings)
@@ -45,6 +73,7 @@ def build_app(*, debug: bool = False) -> Orchestrator:
         reporter=reporter,
         logger=logger,
         runtime_limits=runtime_limits,
+        progress_callback=progress_callback,
     )
 
 
@@ -53,7 +82,7 @@ def run_flow(*, debug: bool = False) -> int:
     if not prompt:
         print('Prompt cannot be empty')
         return 1
-    app = build_app(debug=debug)
+    app = build_app(debug=debug, progress_callback=_terminal_progress)
     result = app.run(prompt, debug=debug)
     print(result.report)
     if debug:
