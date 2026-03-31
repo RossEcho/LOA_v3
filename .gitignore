@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 pytest-cache-files-*/
 runs/
+tool_manifests/*.json
+!tool_manifests/echo_script.json
+!tool_manifests/tool_onboarder.json
