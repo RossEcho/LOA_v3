@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from typing import Any
 
 from loa_v3.model_client import ModelClient, ModelClientError
@@ -55,6 +56,42 @@ def _derive_goal_hints(user_prompt: str) -> dict[str, Any]:
     }
 
 
+def _tool_lookup(tools: list[dict]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for tool in tools:
+        if isinstance(tool, dict) and tool.get('name'):
+            lookup[str(tool['name'])] = tool
+    return lookup
+
+
+def _cli_tool_is_ready(tool: dict[str, Any]) -> bool:
+    metadata = tool.get('metadata') or {}
+    if tool.get('tool_type') != 1:
+        return False
+    resolved = shutil.which(str(tool.get('name') or ''))
+    path_matches = not metadata.get('path') or str(metadata.get('path')) == resolved
+    return bool(metadata.get('detected')) and bool(resolved) and path_matches
+
+
+def _normalize_redundant_onboarding_steps(plan: Plan, tools: list[dict]) -> Plan:
+    lookup = _tool_lookup(tools)
+    filtered_steps: list[PlanStep] = []
+    removed = False
+    for step in plan.steps:
+        if step.tool_name in _onboarding_tool_names(tools):
+            target_name = str((step.tool_input or {}).get('tool_name') or '')
+            existing = lookup.get(target_name)
+            if existing and _cli_tool_is_ready(existing):
+                removed = True
+                continue
+        filtered_steps.append(step)
+
+    if removed and filtered_steps:
+        plan.steps = filtered_steps
+        plan.planner_note = (plan.planner_note + ' Redundant onboarding steps were removed because the tool was already onboarded and up to date.').strip()
+    return plan
+
+
 def _onboarding_tool_names(tools: list[dict]) -> set[str]:
     names: set[str] = set()
     for tool in tools:
@@ -82,14 +119,17 @@ def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
         if not isinstance(tool, dict):
             continue
         metadata = tool.get('metadata') or {}
+        tool_type = tool.get('tool_type')
         entry = {
             'name': tool.get('name'),
             'description': str(tool.get('description') or '')[:160],
             'input_contract': metadata.get('input_contract', {}),
             'usage_hint': str(metadata.get('usage_hint', ''))[:200],
             'capabilities': metadata.get('capabilities', {}),
+            'detected': bool(metadata.get('detected')),
+            'manifest_present': bool(tool.get('manifest_path')),
+            'up_to_date': _cli_tool_is_ready(tool) if tool_type == 1 else False,
         }
-        tool_type = tool.get('tool_type')
         if tool_type == 2:
             catalog['script_tools'].append(entry)
             capabilities = metadata.get('capabilities') or {}
@@ -166,7 +206,7 @@ class ModelBackedPlanner(Planner):
     ) -> Plan:
         if goal_hints.get('onboarding_only'):
             return _normalize_steps_for_onboarding_only(plan, tools)
-        return plan
+        return _normalize_redundant_onboarding_steps(plan, tools)
 
     def __init__(self, model_client: ModelClient, prompt_registry: PromptRegistry) -> None:
         self.model_client = model_client

@@ -21,6 +21,7 @@ Rules:
 - You may create multi-step plans when the goal requires preparation before execution.
 - Respect goal_hints in the input envelope. If goal_hints.onboarding_only is true, do not add a tool-use step unless the user also asked to use, test, run, or verify the tool. A plan that onboards a tool and then executes that tool for an onboarding-only request is invalid.
 - If the goal needs a command that is not yet available but a script tool can onboard CLI tools, first plan the onboarding step, then plan the actual tool use step only when the user explicitly requested usage.
+- If a CLI tool is already detected, has a manifest, and is marked up_to_date in the catalog, use it directly and do not add a redundant onboarding step.
 - Do not assume only one step is enough when the user goal requires setup first.
 - If you cannot produce an executable plan, return a JSON object with an empty steps array.
 

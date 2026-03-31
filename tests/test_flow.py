@@ -124,6 +124,47 @@ def test_planner_debug_snapshot_captures_model_exchange() -> None:
     assert snapshot['model_exchange']['content_preview'] == payload
 
 
+def test_redundant_onboarding_is_removed_when_cli_tool_is_ready() -> None:
+    payload = json.dumps({
+        'id': 'plan_redundant_onboard',
+        'goal': 'check the ip 8.8.8.8',
+        'rationale': 'Model redundantly onboarded ping before using it.',
+        'steps': [
+            {
+                'id': 'step_0',
+                'title': 'Onboard ping',
+                'objective': 'Onboard ping.',
+                'tool_name': 'tool_onboarder',
+                'tool_input': {'tool_name': 'ping'},
+                'expected_outcome': 'A manifest is created.',
+            },
+            {
+                'id': 'step_1',
+                'title': 'Use ping',
+                'objective': 'Use ping.',
+                'tool_name': 'ping',
+                'tool_input': {'arg_1': '8.8.8.8'},
+                'expected_outcome': 'Ping succeeds.',
+            },
+        ],
+    })
+    planner = ModelBackedPlanner(StubModelClient(payload), PromptRegistry(PROJECT_ROOT / 'prompts'))
+    registry = ToolRegistry(PROJECT_ROOT)
+    plan = planner.build_plan('check the ip 8.8.8.8', runtime_limits=RuntimeLimits(max_steps=3, allow_network=True), tools=registry.build_planning_metadata())
+    assert [step.tool_name for step in plan.steps] == ['ping']
+    assert 'already onboarded and up to date' in plan.planner_note
+
+
+
+def test_model_client_accepts_python_dict_like_output() -> None:
+    payload = "{'id': 'plan_python_like', 'goal': 'add the tool nmap', 'rationale': 'python style output', 'steps': [{'id': 'step_1', 'title': 'Onboard nmap', 'objective': 'Add nmap.', 'tool_name': 'tool_onboarder', 'tool_input': {'tool_name': 'nmap'}, 'expected_outcome': 'A manifest is created.'}]}"
+    planner = ModelBackedPlanner(StubModelClient(payload), PromptRegistry(PROJECT_ROOT / 'prompts'))
+    registry = ToolRegistry(PROJECT_ROOT)
+    plan = planner.build_plan('add the tool nmap', runtime_limits=RuntimeLimits(max_steps=3, allow_network=True), tools=registry.build_planning_metadata())
+    assert plan.planning_mode == 'model'
+    assert plan.steps[0].tool_name == 'tool_onboarder'
+
+
 def test_onboarding_only_goal_trims_invalid_model_execution_steps() -> None:
     payload = json.dumps({
         'id': 'plan_invalid_extra_use',

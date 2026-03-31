@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import ast
 import json
 from typing import Any
 
@@ -42,8 +43,11 @@ def extract_json_object(text: str) -> dict[str, Any]:
                 candidate = text[start : index + 1]
                 try:
                     parsed = json.loads(candidate)
-                except json.JSONDecodeError as exc:
-                    raise ModelClientError("model output did not contain a valid JSON object") from exc
+                except json.JSONDecodeError:
+                    try:
+                        parsed = ast.literal_eval(candidate)
+                    except (SyntaxError, ValueError) as exc:
+                        raise ModelClientError("model output did not contain a valid JSON object") from exc
                 if not isinstance(parsed, dict):
                     raise ModelClientError("model output JSON is not an object")
                 return parsed
