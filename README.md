@@ -2,13 +2,11 @@
 
 LOA_v3 is a Linux-first semi-autonomous local operations agent.
 
-It is being shaped as a practical machine-side operator for cyber security, system inspection, and controlled tool execution, with a strong focus on bounded autonomy, debuggability, and low-resource hardware support. The current real-world test target is a rooted Samsung S21 FE running Termux, while Windows remains a development convenience environment.
-
-LOA_v3 is a clean rewrite of LOA_v2. LOA_v2 is reference-only and was used mainly to recover working `llama-server` integration details, request settings, and prompt formatting patterns.
+It is being shaped as a practical machine-side operator for cybersecurity, system inspection, and controlled tool execution, with a strong focus on bounded autonomy, debuggability, and low-resource hardware support. The current real-world test target is a rooted Android running Termux.
 
 ## Project Direction
 
-The intended end state is closer to an OpenClaw-style semi-autonomous agent than a simple prompt-to-command wrapper.
+The intended end state is closer to a semi-autonomous agent than a simple prompt-to-command wrapper.
 
 LOA_v3 is meant to:
 
@@ -269,10 +267,3 @@ The most important next steps are:
 - add better handling for long-running, interactive, and privileged tools
 - group tools around cyber/Linux capabilities such as recon, package, process, filesystem, and device operations
 - decide whether `SmarTar` becomes part of the memory layer, stays a separate script tool, or is removed
-
-## Notes
-
-- LOA_v2 is reference-only.
-- LOA_v3 is a rewrite, not a refactor.
-- Termux/Linux runtime behavior matters more than Windows shell behavior.
-- The current lightweight model should be treated as a constraint to design around, not ignored.
