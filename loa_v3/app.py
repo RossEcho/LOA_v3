@@ -77,6 +77,18 @@ def build_app(*, debug: bool = False, progress_callback=None) -> Orchestrator:
     )
 
 
+def _build_debug_payload(app: Orchestrator, result) -> dict:
+    payload = result.to_dict()
+    planner_debug = getattr(app.planner, 'debug_snapshot', None)
+    if callable(planner_debug):
+        snapshot = planner_debug()
+        payload['planner_debug'] = snapshot
+        model_exchange = snapshot.get('model_exchange') if isinstance(snapshot, dict) else None
+        if isinstance(model_exchange, dict):
+            payload['raw_llama_server_response'] = model_exchange.get('raw_response', '')
+    return payload
+
+
 def run_flow(*, debug: bool = False) -> int:
     prompt = input('Prompt: ').strip()
     if not prompt:
@@ -86,7 +98,7 @@ def run_flow(*, debug: bool = False) -> int:
     result = app.run(prompt, debug=debug)
     print(result.report)
     if debug:
-        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        print(json.dumps(_build_debug_payload(app, result), ensure_ascii=False, indent=2))
     return 0
 
 

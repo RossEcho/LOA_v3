@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from loa_v3.app import _logs_summary, _progress_message, _settings_summary
+from loa_v3.app import _build_debug_payload, _logs_summary, _progress_message, _settings_summary
 from loa_v3.config_loader import SettingsLoader
 from loa_v3.prompt_registry import PromptRegistry
 
@@ -47,3 +47,28 @@ def test_logs_summary_exposes_cleanup_actions(tmp_path: Path) -> None:
 def test_progress_message_formats_runtime_updates() -> None:
     assert _progress_message('planning_retry', {'attempt': 2}).startswith('Retrying planning')
     assert 'use_ping' in _progress_message('step_started', {'step_id': 'use_ping', 'tool_name': 'ping'})
+
+
+class _PlannerWithSnapshot:
+    def debug_snapshot(self) -> dict:
+        return {
+            'model_exchange': {
+                'raw_response': '{"choices":[{"message":{"content":"{}"}}]}'
+            }
+        }
+
+
+class _AppWithPlanner:
+    def __init__(self) -> None:
+        self.planner = _PlannerWithSnapshot()
+
+
+class _ResultStub:
+    def to_dict(self) -> dict:
+        return {'report': 'ok'}
+
+
+def test_build_debug_payload_includes_raw_llama_response() -> None:
+    payload = _build_debug_payload(_AppWithPlanner(), _ResultStub())
+    assert 'planner_debug' in payload
+    assert payload['raw_llama_server_response'].startswith('{"choices"')
