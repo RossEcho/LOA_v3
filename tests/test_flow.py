@@ -14,6 +14,7 @@ from loa_v3.prompt_registry import PromptRegistry
 from loa_v3.reporter import Reporter
 from loa_v3.tool_introspection import build_cli_metadata
 from loa_v3.tool_registry import ToolRegistry
+from loa_v3.tool_state import evaluate_tool_state
 from loa_v3.tool_runner import ToolRunner
 from loa_v3.tool_selector import ToolSelector
 from loa_v3.types import PlanStep, RuntimeLimits
@@ -216,6 +217,37 @@ def test_registry_reload_picks_up_new_manifest(tmp_path: Path) -> None:
     assert registry.get('tempcli').name == 'tempcli'
 
 
+def test_tool_runner_expands_multi_onboard_script_args(tmp_path: Path) -> None:
+    project_root = tmp_path / 'multi_onboard_project'
+    project_root.mkdir()
+    (project_root / 'tool_manifests').mkdir()
+    script_file = project_root / 'collect_args.py'
+    script_file.write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding='utf-8')
+    (project_root / 'tool_manifests' / 'multi.json').write_text(json.dumps({
+        'name': 'multi',
+        'tool_type': 2,
+        'description': 'script tool test',
+        'command_template': [],
+        'metadata': {
+            'script_path': 'collect_args.py',
+            'input_contract': {'tool_names': 'string[]'},
+            'argument_order': ['tool_names'],
+        },
+    }, ensure_ascii=False), encoding='utf-8')
+    registry = ToolRegistry(project_root)
+    runner = ToolRunner(project_root, registry, RuntimeLimits(max_steps=2, allow_network=True))
+    outcome = runner.run_step(PlanStep(
+        id='step_1',
+        title='Multi onboard',
+        objective='Pass multiple tool names to script.',
+        tool_name='multi',
+        tool_input={'tool_names': ['ping', 'nmap']},
+        expected_outcome='Script receives both tool names.',
+    ))
+    assert outcome.exit_code == 0
+    assert json.loads(outcome.stdout.strip()) == ['ping', 'nmap']
+
+
 def test_model_can_choose_tool_onboarder_script_tool() -> None:
     candidate = 'python' if shutil.which('python') else Path(sys.executable).name
     manifest_path = PROJECT_ROOT / 'tool_manifests' / f'{candidate}.json'
@@ -231,7 +263,7 @@ def test_model_can_choose_tool_onboarder_script_tool() -> None:
                 'title': 'Onboard CLI tool',
                 'objective': f'Register {candidate} as an available CLI tool.',
                 'tool_name': 'tool_onboarder',
-                'tool_input': {'tool_name': candidate},
+                'tool_input': {'tool_names': [candidate]},
                 'expected_outcome': 'A manifest is created.'
             }
         ]
@@ -330,7 +362,7 @@ def test_tool_registry_enriches_generic_cli_and_onboarder_metadata() -> None:
     assert ping.metadata['input_contract']
     assert 'execution' in ping.metadata
     assert ping.metadata['required_args'] == list(ping.metadata['input_contract'].keys())
-    assert registry.get('tool_onboarder').metadata['input_contract'] == {'tool_name': 'string'}
+    assert registry.get('tool_onboarder').metadata['input_contract'] == {'tool_names': 'string[]'}
     assert registry.get('tool_onboarder').metadata['capabilities']['adds_cli_tools'] is True
 
 
@@ -429,3 +461,21 @@ def test_report_includes_planning_mode() -> None:
     orchestrator = build_fallback_orchestrator()
     result = orchestrator.run('list network status', debug=True)
     assert 'Planning mode: fallback' in result.report
+
+
+def test_tool_state_marks_ready_cli_with_manifest_and_matching_path() -> None:
+    registry = ToolRegistry(PROJECT_ROOT)
+    state = evaluate_tool_state(registry.get('ping'))
+    assert state.detected is True
+    assert state.manifest_present is True
+    assert state.ready is True
+    assert state.needs_onboarding is False
+
+
+def test_planner_catalog_exposes_tool_state_flags() -> None:
+    registry = ToolRegistry(PROJECT_ROOT)
+    catalog = _build_planner_catalog(registry.build_planning_metadata())
+    ping_entry = next(item for item in catalog['cli_tools'] if item['name'] == 'ping')
+    assert 'ready' in ping_entry
+    assert 'needs_onboarding' in ping_entry
+    assert ping_entry['ready'] is True

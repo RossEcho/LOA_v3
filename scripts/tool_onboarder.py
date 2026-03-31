@@ -12,22 +12,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from loa_v3.tool_introspection import build_cli_metadata, capture_first_output
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print(json.dumps({'ok': False, 'error': 'usage: tool_onboarder.py <tool_name>'}, ensure_ascii=False))
-        return 2
-
-    tool_name = str(argv[1]).strip()
-    if not tool_name:
-        print(json.dumps({'ok': False, 'error': 'tool_name cannot be empty'}, ensure_ascii=False))
-        return 2
-
+def _onboard_one(tool_name: str, project_root: Path) -> dict[str, object]:
     resolved = shutil.which(tool_name)
     if not resolved:
-        print(json.dumps({'ok': False, 'error': f"tool '{tool_name}' was not found on PATH"}, ensure_ascii=False))
-        return 1
+        return {'ok': False, 'tool_name': tool_name, 'error': f"tool '{tool_name}' was not found on PATH"}
 
-    project_root = Path(__file__).resolve().parents[1]
     manifest_root = project_root / 'tool_manifests'
     manifest_root.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_root / f'{tool_name}.json'
@@ -56,8 +45,29 @@ def main(argv: list[str]) -> int:
         'metadata': metadata,
     }
     manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(json.dumps({'ok': True, 'tool_name': tool_name, 'manifest_path': str(manifest_path)}, ensure_ascii=False))
-    return 0
+    return {'ok': True, 'tool_name': tool_name, 'manifest_path': str(manifest_path)}
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print(json.dumps({'ok': False, 'error': 'usage: tool_onboarder.py <tool_name> [tool_name ...]'}, ensure_ascii=False))
+        return 2
+
+    tool_names = [str(item).strip() for item in argv[1:] if str(item).strip()]
+    if not tool_names:
+        print(json.dumps({'ok': False, 'error': 'at least one tool name is required'}, ensure_ascii=False))
+        return 2
+
+    project_root = Path(__file__).resolve().parents[1]
+    results = [_onboard_one(tool_name, project_root) for tool_name in tool_names]
+    success = all(bool(item.get('ok')) for item in results)
+    payload = {
+        'ok': success,
+        'requested_tools': tool_names,
+        'results': results,
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+    return 0 if success else 1
 
 
 if __name__ == '__main__':

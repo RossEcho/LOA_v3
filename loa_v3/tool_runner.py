@@ -108,7 +108,12 @@ class ToolRunner:
             resolved_script = (self.project_root / script_path).resolve()
             if not resolved_script.exists():
                 raise ToolRunnerError(f'script tool path not found: {resolved_script}')
-            args = [str(value) for value in step.tool_input.values()]
+            args: list[str] = []
+            for value in step.tool_input.values():
+                if isinstance(value, list):
+                    args.extend(str(item) for item in value if str(item).strip())
+                elif value not in (None, ''):
+                    args.append(str(value))
             return [sys.executable, str(resolved_script), *args]
 
         if tool.command_template:

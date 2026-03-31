@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import sys
 
+from loa_v3.tool_state import evaluate_tool_state
 from loa_v3.types import ToolDefinition
 
 
@@ -72,7 +73,8 @@ class ToolRegistry:
             command_template=[sys.executable],
             metadata={
                 'detected': sys.executable,
-                'version': sys.version.split()[0],
+                'path': sys.executable,
+                'version_preview': sys.version.split()[0],
                 'help_hint': '--help',
                 'input_contract': {'arg_1': 'string'},
                 'argument_order': ['arg_1'],
@@ -112,7 +114,26 @@ class ToolRegistry:
         return self._tools[name]
 
     def build_planning_metadata(self) -> list[dict]:
-        return [tool.to_dict() for tool in self.list_tools()]
+        metadata: list[dict] = []
+        for tool in self.list_tools():
+            payload = tool.to_dict()
+            payload['state'] = evaluate_tool_state(tool).to_dict() if tool.tool_type == 1 else {
+                'name': tool.name,
+                'tool_type': int(tool.tool_type),
+                'detected': True,
+                'manifest_present': bool(tool.manifest_path),
+                'resolved_path': '',
+                'recorded_path': '',
+                'path_matches': True,
+                'version_recorded': False,
+                'version_matches': None,
+                'ready': True,
+                'needs_onboarding': False,
+                'stale': False,
+                'reasons': [],
+            }
+            metadata.append(payload)
+        return metadata
 
     def detect_cli_tool(self, command_name: str) -> dict[str, str | bool]:
         resolved = shutil.which(command_name)

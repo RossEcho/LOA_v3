@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import subprocess
 
 from loa_v3.config_loader import SettingsLoader
@@ -17,6 +18,7 @@ from loa_v3.tool_selector import ToolSelector
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RUNS_ROOT = PROJECT_ROOT / 'runs'
 
 
 def build_app(*, debug: bool = False) -> Orchestrator:
@@ -82,6 +84,100 @@ def _settings_summary(settings: dict) -> list[str]:
         '6) Show full settings JSON',
         '7) Back',
     ]
+
+
+def _list_run_directories() -> list[Path]:
+    if not RUNS_ROOT.exists():
+        return []
+    return sorted((path for path in RUNS_ROOT.iterdir() if path.is_dir()), key=lambda item: item.name, reverse=True)
+
+
+def _logs_summary(run_dirs: list[Path]) -> list[str]:
+    lines = [
+        f'Runs root: {RUNS_ROOT}',
+        f'Log sessions: {len(run_dirs)}',
+        '1) Show recent log sessions',
+        '2) Clear one log session',
+        '3) Clear all log sessions',
+        '4) Back',
+    ]
+    if run_dirs:
+        lines.append('Recent:')
+        for run_dir in run_dirs[:5]:
+            lines.append(f'   - {run_dir.name}')
+    return lines
+
+
+def _print_recent_runs(run_dirs: list[Path], limit: int = 20) -> None:
+    if not run_dirs:
+        print('No log sessions found')
+        return
+    print(f'Recent log sessions ({min(len(run_dirs), limit)} shown):')
+    for index, run_dir in enumerate(run_dirs[:limit], start=1):
+        print(f'{index}) {run_dir.name}')
+
+
+def _clear_single_log_session() -> None:
+    run_dirs = _list_run_directories()
+    if not run_dirs:
+        print('No log sessions to clear')
+        return
+    _print_recent_runs(run_dirs)
+    choice = input(f'Select session [1-{len(run_dirs[:20])}] or blank to cancel: ').strip()
+    if not choice:
+        print('Clear one cancelled')
+        return
+    if not choice.isdigit():
+        print('Invalid selection')
+        return
+    selected_index = int(choice)
+    visible_runs = run_dirs[:20]
+    if selected_index < 1 or selected_index > len(visible_runs):
+        print('Invalid selection')
+        return
+    target = visible_runs[selected_index - 1]
+    confirm = input(f"Type DELETE to remove '{target.name}': ").strip()
+    if confirm != 'DELETE':
+        print('Clear one cancelled')
+        return
+    shutil.rmtree(target)
+    print(f'Removed log session: {target.name}')
+
+
+def _clear_all_log_sessions() -> None:
+    run_dirs = _list_run_directories()
+    if not run_dirs:
+        print('No log sessions to clear')
+        return
+    confirm = input(f'Type DELETE ALL to remove {len(run_dirs)} log sessions: ').strip()
+    if confirm != 'DELETE ALL':
+        print('Clear all cancelled')
+        return
+    for run_dir in run_dirs:
+        shutil.rmtree(run_dir)
+    print(f'Removed {len(run_dirs)} log sessions')
+
+
+def logs_menu() -> int:
+    while True:
+        run_dirs = _list_run_directories()
+        print('Logs Menu')
+        for line in _logs_summary(run_dirs):
+            print(line)
+        choice = input('Select [1-4]: ').strip()
+
+        if choice == '1':
+            _print_recent_runs(run_dirs)
+            continue
+        if choice == '2':
+            _clear_single_log_session()
+            continue
+        if choice == '3':
+            _clear_all_log_sessions()
+            continue
+        if choice == '4':
+            return 0
+        print('Invalid selection')
 
 
 def settings_menu() -> int:
@@ -160,8 +256,9 @@ def main() -> int:
         print('2) Settings')
         print('3) Conversation flow')
         print('4) Debug mode')
-        print('5) Exit')
-        choice = input('Select [1-5]: ').strip()
+        print('5) Logs')
+        print('6) Exit')
+        choice = input('Select [1-6]: ').strip()
 
         if choice == '1':
             tests_menu()
@@ -176,5 +273,8 @@ def main() -> int:
             run_flow(debug=True)
             continue
         if choice == '5':
+            logs_menu()
+            continue
+        if choice == '6':
             return 0
         print('Invalid selection')

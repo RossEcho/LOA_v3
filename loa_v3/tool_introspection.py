@@ -66,7 +66,7 @@ def infer_input_contract(tool_name: str, help_output: str) -> dict[str, str]:
 
     if not positionals:
         cleaned_usage = re.sub(r'\[[^\]]*\]', ' ', usage_line)
-        tokens = re.findall(r'[A-Z][A-Z0-9_-]*|[a-zA-Z][a-zA-Z0-9_.:-]*', cleaned_usage)
+        tokens = re.findall(r'\b[A-Z][A-Z0-9_-]*\b|\b[a-zA-Z][a-zA-Z0-9_.:-]*\b', cleaned_usage)
         for token in tokens:
             lowered = token.casefold()
             if lowered in command_tokens or lowered in {'usage', 'options', 'option'}:

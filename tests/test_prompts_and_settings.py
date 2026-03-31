@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from loa_v3.app import _settings_summary
+from loa_v3.app import _logs_summary, _settings_summary
 from loa_v3.config_loader import SettingsLoader
 from loa_v3.prompt_registry import PromptRegistry
 
@@ -33,3 +33,12 @@ def test_settings_summary_exposes_submenu_items() -> None:
     assert any('Llama endpoint' in item for item in summary)
     assert any('Command timeout sec' in item for item in summary)
     assert summary[-1] == '7) Back'
+
+
+def test_logs_summary_exposes_cleanup_actions(tmp_path: Path) -> None:
+    run_dirs = [tmp_path / 'run_a', tmp_path / 'run_b']
+    summary = _logs_summary(run_dirs)
+    assert any('Show recent log sessions' in item for item in summary)
+    assert any('Clear one log session' in item for item in summary)
+    assert any('Clear all log sessions' in item for item in summary)
+    assert summary[-1].endswith('run_b')

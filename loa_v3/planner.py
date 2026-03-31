@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from typing import Any
 
 from loa_v3.model_client import ModelClient, ModelClientError
@@ -65,30 +64,37 @@ def _tool_lookup(tools: list[dict]) -> dict[str, dict[str, Any]]:
 
 
 def _cli_tool_is_ready(tool: dict[str, Any]) -> bool:
+    state = tool.get('state') or {}
+    if state:
+        return bool(state.get('ready'))
     metadata = tool.get('metadata') or {}
-    if tool.get('tool_type') != 1:
-        return False
-    resolved = shutil.which(str(tool.get('name') or ''))
-    path_matches = not metadata.get('path') or str(metadata.get('path')) == resolved
-    return bool(metadata.get('detected')) and bool(resolved) and path_matches
+    return bool(tool.get('tool_type') == 1 and metadata.get('detected') and metadata.get('path'))
+
+
+def _target_tool_names(step: PlanStep) -> list[str]:
+    raw_names = (step.tool_input or {}).get('tool_names')
+    if isinstance(raw_names, list):
+        return [str(item).strip() for item in raw_names if str(item).strip()]
+    raw_name = str((step.tool_input or {}).get('tool_name') or '').strip()
+    return [raw_name] if raw_name else []
 
 
 def _normalize_redundant_onboarding_steps(plan: Plan, tools: list[dict]) -> Plan:
     lookup = _tool_lookup(tools)
     filtered_steps: list[PlanStep] = []
-    removed = False
+    removed_targets: list[str] = []
     for step in plan.steps:
         if step.tool_name in _onboarding_tool_names(tools):
-            target_name = str((step.tool_input or {}).get('tool_name') or '')
-            existing = lookup.get(target_name)
-            if existing and _cli_tool_is_ready(existing):
-                removed = True
+            targets = _target_tool_names(step)
+            if targets and all(_cli_tool_is_ready(lookup.get(target, {})) for target in targets if lookup.get(target)) and all(target in lookup for target in targets):
+                removed_targets.extend(targets)
                 continue
         filtered_steps.append(step)
 
-    if removed and filtered_steps:
+    if removed_targets and filtered_steps:
         plan.steps = filtered_steps
-        plan.planner_note = (plan.planner_note + ' Redundant onboarding steps were removed because the tool was already onboarded and up to date.').strip()
+        deduped = ', '.join(dict.fromkeys(removed_targets))
+        plan.planner_note = (plan.planner_note + f' Redundant onboarding steps were removed because {deduped} was already onboarded and up to date.').strip()
     return plan
 
 
@@ -115,10 +121,13 @@ def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
         'planning_hints': [],
     }
     onboarding_tools: list[str] = []
+    ready_cli_tools: list[str] = []
+    stale_cli_tools: list[str] = []
     for tool in tools:
         if not isinstance(tool, dict):
             continue
         metadata = tool.get('metadata') or {}
+        state = tool.get('state') or {}
         tool_type = tool.get('tool_type')
         entry = {
             'name': tool.get('name'),
@@ -126,9 +135,12 @@ def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
             'input_contract': metadata.get('input_contract', {}),
             'usage_hint': str(metadata.get('usage_hint', ''))[:200],
             'capabilities': metadata.get('capabilities', {}),
-            'detected': bool(metadata.get('detected')),
-            'manifest_present': bool(tool.get('manifest_path')),
-            'up_to_date': _cli_tool_is_ready(tool) if tool_type == 1 else False,
+            'detected': bool(state.get('detected', metadata.get('detected'))),
+            'manifest_present': bool(state.get('manifest_present', tool.get('manifest_path'))),
+            'ready': bool(state.get('ready')),
+            'stale': bool(state.get('stale')),
+            'needs_onboarding': bool(state.get('needs_onboarding')),
+            'state_reasons': list(state.get('reasons', []))[:4],
         }
         if tool_type == 2:
             catalog['script_tools'].append(entry)
@@ -137,6 +149,10 @@ def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
                 onboarding_tools.append(str(tool.get('name')))
         elif tool_type == 1:
             catalog['cli_tools'].append(entry)
+            if entry['ready']:
+                ready_cli_tools.append(str(tool.get('name')))
+            if entry['stale']:
+                stale_cli_tools.append(str(tool.get('name')))
         else:
             catalog['master_tools'].append(entry)
 
@@ -149,6 +165,14 @@ def _build_planner_catalog(tools: list[dict]) -> dict[str, Any]:
         )
         catalog['planning_hints'].append(
             'Onboarding-capable script tools: ' + ', '.join(onboarding_tools)
+        )
+    if ready_cli_tools:
+        catalog['planning_hints'].append(
+            'If a CLI tool is marked ready=true, do not add a redundant onboarding step unless the user explicitly asked to refresh or re-add it.'
+        )
+    if stale_cli_tools:
+        catalog['planning_hints'].append(
+            'If a CLI tool is marked stale=true or needs_onboarding=true, refreshing its manifest is preferred before use.'
         )
     return catalog
 
